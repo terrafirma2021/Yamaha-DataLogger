@@ -1,9 +1,9 @@
-// Including necessary libraries for the Arduino BLE functionality and additional functionality.
+// Includes
 #include <Arduino.h>
 #include <BLE2902.h>
 #include <BLECharacteristic.h>
 #include <BLEDevice.h>
-#include <yds.h> // This seems to be a custom or specific library not recognized in standard Arduino libraries.
+#include <yds.h>
 
 // Definition of constants for RX and TX pins.
 #define DASH_RX 1
