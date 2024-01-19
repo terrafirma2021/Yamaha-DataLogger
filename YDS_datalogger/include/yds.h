@@ -11,6 +11,27 @@ const byte IMMO_START_BYTE = 0x3E;
 const byte DIAG_START_BYTE = 0xCD;
 const unsigned int IMMO_BUFFER_SIZE = 54; // Adjust this as necessary
 
+
+
+// Fully Customizable Gear Ratio Calculation
+// Use the Simple Gear Ratio Calculator on Github to get the values for your bike!
+
+// Define constants for gear detection
+double Gear1Constant = 0.52;
+double Gear2Constant = 0.35;
+double Gear3Constant = 0.25;
+double Gear4Constant = 0.20;
+double Gear5Constant = 0.17;
+double Tolerance = 0.05;
+
+// Define constants for gear variation  
+double Gear1Variation = 1.93;
+double Gear2Variation = 2.84;
+double Gear3Variation = 4.05;
+double Gear4Variation = 5.05;
+double Gear5Variation = 6.02;
+
+
 // Define the size of the buffers used to store data
 #define VEHICLE_SPEED_RAW_BUFFER_SIZE 8
 #define ECU_BUFFER_SIZE 5
@@ -24,6 +45,7 @@ byte IMMO_Buffer[IMMO_BUFFER_SIZE]; // IMMO sequence buffer
 uint16_t RPM_PID;
 uint8_t Coolant_PID;
 uint8_t Speed_PID;
+uint8_t Gear_PID;
 
 // Declare variables to keep track of buffer indices and time
 byte VehicleSpeedRawBufferIndex = 0;
@@ -45,7 +67,7 @@ void calculateRPM()
 {
   uint16_t RPM = ECU_Buffer[0] * 50; // Adjusted multiplication factor
   RPM = RPM / 4;                     // Adjusted division factor
-  RPM_PID = RPM;                     
+  RPM_PID = RPM;
 }
 
 // Function to calculate coolant temperature from the ECU data
@@ -81,6 +103,46 @@ void calculateVehicleSpeed()
     VehicleSpeedRawBufferIndex = 0;
   }
 }
+
+// Function to calculate gear from the ECU data
+void calculateGear()
+{
+  // Check if either Speed_PID or RPM_PID is zero
+  if (Speed_PID == 0 || RPM_PID == 0)
+  {
+    Gear_PID = 0; // Neutral gear if speed or RPM is zero
+    return;
+  }
+
+  double CurrentGear = Speed_PID / RPM_PID; // Calculate the current gear ratio
+
+  // Determine the gear based on CurrentGear and gear variations
+  if (fabs(CurrentGear - (Gear1Constant + Gear1Variation)) <= Tolerance)
+  {
+    Gear_PID = 1; // Vehicle is in 1st gear
+  }
+  else if (fabs(CurrentGear - (Gear2Constant + Gear2Variation)) <= Tolerance)
+  {
+    Gear_PID = 2; // Vehicle is in 2nd gear
+  }
+  else if (fabs(CurrentGear - (Gear3Constant + Gear3Variation)) <= Tolerance)
+  {
+    Gear_PID = 3; // Vehicle is in 3rd gear
+  }
+  else if (fabs(CurrentGear - (Gear4Constant + Gear4Variation)) <= Tolerance)
+  {
+    Gear_PID = 4; // Vehicle is in 4th gear
+  }
+  else if (fabs(CurrentGear - (Gear5Constant + Gear5Variation)) <= Tolerance)
+  {
+    Gear_PID = 5; // Vehicle is in 5th gear
+  }
+  else
+  {
+    Gear_PID = 0; // Neutral gear as a failsafe
+  }
+}
+
 
 // Function to process the ECU data
 void processECUData()
