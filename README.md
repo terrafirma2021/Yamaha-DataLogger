@@ -1,5 +1,5 @@
-### Project Title: Yamaha DataLogger
-ESP32 s3 Yamaha Datalogger
+### Yamaha DataLogger
+ESP32 s3 BLE Yamaha Datalogger
 
 #### Description:
 The Yamaha DataLogger is an ESP32-based device designed to convert data received from the k-line into Canbus ODB2 standard. This functionality enables compatibility with various apps like RaceChrono, Realdash, and Torque. Additionally, the project plans to support Gear information in the future.
