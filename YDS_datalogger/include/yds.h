@@ -12,25 +12,15 @@ const byte DIAG_START_BYTE = 0xCD;
 const unsigned int IMMO_BUFFER_SIZE = 54; // Adjust this as necessary
 
 
-
-// Fully Customizable Gear Ratio Calculation
 // Use the Simple Gear Ratio Calculator on Github to get the values for your bike!
 
 // Define constants for gear detection
-double Gear1Constant = 0.52;
-double Gear2Constant = 0.35;
-double Gear3Constant = 0.25;
-double Gear4Constant = 0.20;
-double Gear5Constant = 0.17;
-double Tolerance = 0.05;
-
-// Define constants for gear variation  
-double Gear1Variation = 1.93;
-double Gear2Variation = 2.84;
-double Gear3Variation = 4.05;
-double Gear4Variation = 5.05;
-double Gear5Variation = 6.02;
-
+uint8_t Gear1Constant = 61;
+uint8_t Gear2Constant = 90;
+uint8_t Gear3Constant = 129;
+uint8_t Gear4Constant = 161;
+uint8_t Gear5Constant = 192;
+uint8_t Tolerance = 1;
 
 // Define the size of the buffers used to store data
 #define VEHICLE_SPEED_RAW_BUFFER_SIZE 8
@@ -114,26 +104,31 @@ void calculateGear()
     return;
   }
 
-  double CurrentGear = Speed_PID / RPM_PID; // Calculate the current gear ratio
+  // Calculate the CurrentGear based on Speed and RPM
+  uint16_t CurrentGear;
+
+  CurrentGear = static_cast<uint16_t>((30 / 1200) * 10000);
 
   // Determine the gear based on CurrentGear and gear variations
-  if (fabs(CurrentGear - (Gear1Constant + Gear1Variation)) <= Tolerance)
+  Gear_PID = 0; // Default to an undefined gear
+
+  if (abs(CurrentGear - Gear1Constant) <= Tolerance)
   {
     Gear_PID = 1; // Vehicle is in 1st gear
   }
-  else if (fabs(CurrentGear - (Gear2Constant + Gear2Variation)) <= Tolerance)
+  else if (abs(CurrentGear - Gear2Constant) <= Tolerance)
   {
     Gear_PID = 2; // Vehicle is in 2nd gear
   }
-  else if (fabs(CurrentGear - (Gear3Constant + Gear3Variation)) <= Tolerance)
+  else if (abs(CurrentGear - Gear3Constant) <= Tolerance)
   {
     Gear_PID = 3; // Vehicle is in 3rd gear
   }
-  else if (fabs(CurrentGear - (Gear4Constant + Gear4Variation)) <= Tolerance)
+  else if (abs(CurrentGear - Gear4Constant) <= Tolerance)
   {
     Gear_PID = 4; // Vehicle is in 4th gear
   }
-  else if (fabs(CurrentGear - (Gear5Constant + Gear5Variation)) <= Tolerance)
+  else if (abs(CurrentGear - Gear5Constant) <= Tolerance)
   {
     Gear_PID = 5; // Vehicle is in 5th gear
   }
@@ -142,7 +137,6 @@ void calculateGear()
     Gear_PID = 0; // Neutral gear as a failsafe
   }
 }
-
 
 // Function to process the ECU data
 void processECUData()
