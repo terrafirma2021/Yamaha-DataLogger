@@ -11,7 +11,6 @@ const byte IMMO_START_BYTE = 0x3E;
 const byte DIAG_START_BYTE = 0xCD;
 const unsigned int IMMO_BUFFER_SIZE = 54; // Adjust this as necessary
 
-
 // Use the Simple Gear Ratio Calculator on Github to get the values for your bike!
 
 // Define constants for gear detection
@@ -35,7 +34,7 @@ byte IMMO_Buffer[IMMO_BUFFER_SIZE]; // IMMO sequence buffer
 uint16_t RPM_PID;
 uint8_t Coolant_PID;
 uint8_t Speed_PID;
-uint8_t Gear_PID;
+uint16_t Gear_PID;
 
 // Declare variables to keep track of buffer indices and time
 byte VehicleSpeedRawBufferIndex = 0;
@@ -94,7 +93,7 @@ void calculateVehicleSpeed()
   }
 }
 
-// Function to calculate gear from the ECU data
+// Function to calculate gear and convert it to ODB standard
 void calculateGear()
 {
   // Check if either Speed_PID or RPM_PID is zero
@@ -136,6 +135,9 @@ void calculateGear()
   {
     Gear_PID = 0; // Neutral gear as a failsafe
   }
+
+  // Convert Gear_pid to ODB standard
+  Gear_PID = Gear_PID * 1000;
 }
 
 // Function to process the ECU data
