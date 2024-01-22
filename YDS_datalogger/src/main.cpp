@@ -1,4 +1,4 @@
-// Includes
+// Including necessary libraries for the Arduino BLE functionality and additional functionality.
 #include <Arduino.h>
 #include <BLE2902.h>
 #include <BLECharacteristic.h>
@@ -167,6 +167,11 @@ namespace elm327
       {
         len--;
       }
+      // Convert data to uppercase
+      for (size_t i = start; i < len; i++)
+      {
+        value[i] = toupper(value[i]);
+      }
 
 #if DEBUG_LEVEL >= 1
       Serial.print("Received: ");
@@ -238,27 +243,27 @@ namespace elm327
       }
       else if (command == "0100")
       { // PID 1 - Supported PIDs [01-20]
-        response = "41 00 04 0C 00 00 00";
+        response = "41 00 08 18 00 01";
       }
       else if (command == "0120")
       { // PID 2 - Supported PIDs [21-40]
-        response = "41 20 NO DATA";
+        response = "41 20 00 00 00 01";
       }
       else if (command == "0140")
       { // PID 3 - Supported PIDs [41-60]
-        response = "441 40 NO DATA";
+        response = "41 40 00 00 00 01";
       }
       else if (command == "0160")
       { // PID 4 - Supported PIDs [61-80]
-        response = "41 60 NO DATA";
+        response = "41 60 00 00 00 01";
       }
       else if (command == "0180")
       { // PID 5 - Supported PIDs [81-A0]
-        response = "41 80 NO DATA";
+        response = "41 80 00 00 00 00";
       }
       else if (command == "01A0")
       { // PID 6 - Supported PIDs [A1-C0]
-        response = "41 A0 08 00 00 00 00";
+        response = "41 A0 10 00 00 00 00";
       }
       else if (command == "01C0")
       { // PID 7 - Supported PIDs [C1-E0]
@@ -279,8 +284,8 @@ namespace elm327
         response = "41 0D " + std::to_string(Speed_PID);
       }
       else if (command == "01A4")
-      {                        // Transmission Actual Gear (PID 01A4)
-        response = "41 0D 64"; // send fake data untill we can figure out how to get the actual gear
+      { // Transmission Actual Gear  (PID 01A4)
+        response = "41 0D 0" + std::to_string(Gear_PID);
       }
       else if (command == "0902")
       { // VIN (PID 0902)
