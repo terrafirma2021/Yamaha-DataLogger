@@ -8,7 +8,8 @@ The Yamaha DataLogger is an ESP32-based device designed to convert data received
 - RPM
 - Speed
 - Coolant Temp
-- Gear (work in progress)
+- Gear
+- Voltage ( todo)
 
 #### Requirements:
 To build this project, you will need the following components:
