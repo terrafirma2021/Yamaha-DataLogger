@@ -11,6 +11,7 @@ const byte IMMO_START_BYTE = 0x3E;
 const byte DIAG_START_BYTE = 0xCD;
 const unsigned int IMMO_BUFFER_SIZE = 54; // Adjust this as necessary
 
+
 // Use the Simple Gear Ratio Calculator on Github to get the values for your bike!
 
 // Define constants for gear detection
@@ -139,6 +140,7 @@ void calculateGear()
   // Convert Gear_pid to ODB standard
   Gear_PID = Gear_PID * 1000;
 }
+
 
 // Function to process the ECU data
 void processECUData()
