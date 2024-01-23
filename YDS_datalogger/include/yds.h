@@ -1,5 +1,8 @@
-
+#ifndef YDS_H
+#define YDS_H
 #include <Arduino.h>
+#include <BLE.h>
+
 
 // Define constants for time thresholds and timeouts
 const unsigned long FRAME_END_THRESHOLD = 5;   // Threshold to detect end of a frame (5 ms)
@@ -258,12 +261,4 @@ void processSerialByte(byte incomingByte)
   }
 }
 
-// Function to read and process serial data
-void readAndProcessSerialData()
-{
-  while (Serial.available())
-  {
-    byte incomingByte = Serial.read();
-    processSerialByte(incomingByte);
-  }
-}
+#endif // YDS_H
