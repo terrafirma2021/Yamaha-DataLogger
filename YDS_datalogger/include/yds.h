@@ -12,7 +12,8 @@ const unsigned long BIKE_OFF_TIMEOUT = 10000;  // 10 seconds BikeOff timer
 // Define constants for magic numbers
 const byte IMMO_START_BYTE = 0x3E;
 const byte DIAG_START_BYTE = 0xCD;
-const unsigned int IMMO_BUFFER_SIZE = 54; // Adjust this as necessary
+const byte NORMAL_OPERATION = 0xFE;
+const unsigned int IMMO_BUFFER_SIZE = 55; // Handles IMMO, Diag and Startup Operation
 
 
 // Use the Simple Gear Ratio Calculator on Github to get the values for your bike!
@@ -51,6 +52,7 @@ unsigned long lastDataTime = 0;
 // Declare flags to track the state of the communication
 bool isIMMOSeq = false;
 bool DiagIsStarting = false;
+bool NormalOperation = false;
 
 // Global variable for enabling debugging
 bool enableDebugging = true; // Set to false to disable debugging
@@ -163,42 +165,48 @@ void processECUData()
   }
 }
 
-// Function to handle the IMMO sequence and start of the diagnostic menu
+// Function to handle the IMMO sequence
 void handleIMMOSequence(byte incomingByte)
 {
-  if (incomingByte == IMMO_START_BYTE)
-  {
-    isIMMOSeq = true;
-  }
-
-  if (isIMMOSeq)
-  {
-    IMMO_Buffer[IMMOIndex++] = incomingByte;
-    if (IMMOIndex >= IMMO_BUFFER_SIZE)
+    if (incomingByte == IMMO_START_BYTE && !isIMMOSeq) 
     {
-      immoSeqEndTime = millis();
-      isIMMOSeq = false; // Reset isIMMOSeq as IMMO buffer is full
-      IMMOIndex = 0;     // Reset the index for IMMO_Buffer
-
-      // Start of diagnostic menu logic
-      if (millis() - immoSeqEndTime <= DIAG_START_TIMEOUT)
-      {
-        if (incomingByte == DIAG_START_BYTE)
-        {
-          DiagIsStarting = true;
-          if (enableDebugging)
-          {
-            Serial.println("Diag Menu Init:");
-          }
-        }
-      }
-      else
-      {
-        DiagIsStarting = false;
-      }
+        Serial.println("IMMO Start Detected, Starting IMMO Sequence");
+        IMMOIndex = 0; 
+        isIMMOSeq = true;
     }
-  }
+
+    if (isIMMOSeq)
+    {
+        IMMO_Buffer[IMMOIndex++] = incomingByte;
+
+        if (IMMOIndex >= IMMO_BUFFER_SIZE)
+        {
+            Serial.println("IMMO End, Processing IMMO Data");
+            IMMOIndex = 0; // Reset the index for IMMO_Buffer
+
+            // Check the last byte in IMMO_Buffer
+            byte lastByte = IMMO_Buffer[IMMO_BUFFER_SIZE - 1];
+            if (lastByte == DIAG_START_BYTE)
+            {
+                DiagIsStarting = true;
+                Serial.println("Diagnostic Menu Starting");
+            }
+            else if (lastByte == NORMAL_OPERATION)
+            {
+                NormalOperation = true;
+                Serial.println("Normal Operation Detected");
+            }
+
+            isIMMOSeq = false;
+            Speed_PID = 0;
+            Gear_PID = 0;
+            Coolant_PID = 0;
+        }
+    }
 }
+
+
+
 
 // Function to handle the bike off condition
 void handleBikeOffCondition()
@@ -208,57 +216,72 @@ void handleBikeOffCondition()
     isIMMOSeq = false;
     DiagIsStarting = false;
     lastDataTime = 0;
-    if (enableDebugging)
-    {
-      Serial.println("Bike seems to be turned off. Waiting for restart...");
-    }
+    Serial.println("Bike Off Detected");
   }
 }
 
-// Function to read and process a single byte of serial data
+// function to handle serial data
 void processSerialByte(byte incomingByte)
 {
-  lastDataTime = millis(); // Update lastDataTime when a byte is received
+    lastDataTime = millis(); // Update lastDataTime when a byte is received
 
-  if (isIMMOSeq || DiagIsStarting)
-  {
-    handleIMMOSequence(incomingByte);
-  }
-  else
-  {
-    // If the buffer is not full, add the incoming byte
-    if (ECUBufferIndex < ECU_BUFFER_SIZE)
+        // Debug print for every byte received
+    Serial.print("Received Byte: 0x");
+    Serial.println(incomingByte, HEX);
+
+    // Check for IMMO Start Byte and debug print
+    if (incomingByte == IMMO_START_BYTE)
     {
-      ECU_Buffer[ECUBufferIndex++] = incomingByte;
+        Serial.print("IMMO Start Byte Detected: 0x");
+        Serial.println(incomingByte, HEX);
     }
 
-    // Check if it's time to process or reset the data
-    if (millis() - lastByteTime > FRAME_END_THRESHOLD)
+    // First handle any ongoing IMMO sequence
+    if (isIMMOSeq || incomingByte == IMMO_START_BYTE)
     {
-      if (ECUBufferIndex == ECU_BUFFER_SIZE)
-      {
-        // Buffer is full, process the data
-        processECUData();
-      }
-      // Whether the buffer was full or not, reset the buffer index for new data
-      ECUBufferIndex = 0;
+        handleIMMOSequence(incomingByte); // Call the function with incomingByte as an argument
+        return; // Return early to ensure IMMO sequence is fully handled before proceeding
     }
 
-    // Byte shifting logic to ensure only the last ECU_BUFFER_SIZE bytes are kept
-    if (ECUBufferIndex == ECU_BUFFER_SIZE)
+    // Proceed only if NormalOperation is flagged true
+    if (NormalOperation)
     {
-      // Shift all bytes in the buffer to the left by one position
-      for (int i = 0; i < ECU_BUFFER_SIZE - 1; i++)
-      {
-        ECU_Buffer[i] = ECU_Buffer[i + 1];
-      }
+        // If the buffer is not full, add the incoming byte
+        if (ECUBufferIndex < ECU_BUFFER_SIZE)
+        {
+            ECU_Buffer[ECUBufferIndex++] = incomingByte;
+        }
 
-      // Insert the new byte at the end of the buffer
-      ECU_Buffer[ECU_BUFFER_SIZE - 1] = incomingByte;
+        // Check if it's time to process or reset the data
+        if (millis() - lastByteTime > FRAME_END_THRESHOLD)
+        {
+            if (ECUBufferIndex == ECU_BUFFER_SIZE)
+            {
+                // Buffer is full, process the data
+                processECUData();
+            }
+            // Whether the buffer was full or not, reset the buffer index for new data
+            ECUBufferIndex = 0;
+        }
+
+        // Byte shifting logic to ensure only the last ECU_BUFFER_SIZE bytes are kept
+        if (ECUBufferIndex == ECU_BUFFER_SIZE)
+        {
+            // Shift all bytes in the buffer to the left by one position
+            for (int i = 0; i < ECU_BUFFER_SIZE - 1; i++)
+            {
+                ECU_Buffer[i] = ECU_Buffer[i + 1];
+            }
+
+            // Insert the new byte at the end of the buffer
+            ECU_Buffer[ECU_BUFFER_SIZE - 1] = incomingByte;
+        }
+
+        lastByteTime = millis(); // Update lastByteTime
     }
-
-    lastByteTime = millis(); // Update lastByteTime
-  }
 }
+
+
+
 
 #endif // YDS_H
