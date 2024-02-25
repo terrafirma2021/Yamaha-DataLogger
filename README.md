@@ -14,7 +14,7 @@ The Yamaha DataLogger is an ESP32-based device designed to convert data received
 #### Requirements:
 To build this project, you will need the following components:
 - L9637D
-- 510 pull-up resistors
+- 510 pull-up resistor
 - Level conversion components
 
 #### Additional Information:
