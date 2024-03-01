@@ -2,37 +2,25 @@
 #include <handlecommand.h>
 #include <BLE.h>
 
-// Definition for L9637D pins
+// Constants for L9637D pins
 #define YAM_TX 12
-#define YAM_RX 33 // Left for future use
+#define YAM_RX 33
 
-// Define constants for time thresholds and timeouts
-const unsigned long FRAME_END_THRESHOLD = 5;   // Threshold to detect end of a frame (5 ms)
-const unsigned long DIAG_START_TIMEOUT = 2000; // Timeout for detecting 0xCD after IMMO sequence (2 seconds)
-const unsigned long BIKE_OFF_TIMEOUT = 10000;  // 10 seconds BikeOff timer
+// Time thresholds and timeouts
+const unsigned long FRAME_END_THRESHOLD_TIMER = 3000; // 5 milliseconds in microseconds
+const unsigned long DIAG_START_TIMEOUT_TIMER = 2000000;   // 2 seconds
+const unsigned long BIKE_OFF_TIMEOUT_TIMER = 5000000;  // 5 seconds in microseconds
 
-// Define constants for magic numbers
+
+// Magic numbers
 const byte IMMO_START_BYTE = 0x3E;
 const byte DIAG_START_BYTE = 0xCD;
 const byte NORMAL_OPERATION = 0xFE;
-const unsigned int IMMO_BUFFER_SIZE = 55; // Handles IMMO, + Switch state operation (last byte)
 
-// Declaing the functions to be used
-void readSerialData();
-void processSerialByte(byte incomingByte);
-void handleIMMOSequence(byte incomingByte);
-void handleDiagStart(byte incomingByte);
-void HandleNormalOperation(byte incomingByte);
-void processECUData();
-void handleBikeOffCondition();
-void calculateRPM();
-void calculateVehicleSpeed();
-void calculateCoolantTemp();
-void calculateGear();
+// Debugging
+bool enableDebugging = true; // Set to false to disable debugging
 
-// Use the Simple Gear Ratio Calculator on Github to get the values for your bike!
-
-// Define constants for gear detection
+// Gear detection constants
 uint8_t Gear1Constant = 61;
 uint8_t Gear2Constant = 90;
 uint8_t Gear3Constant = 129;
@@ -40,31 +28,43 @@ uint8_t Gear4Constant = 161;
 uint8_t Gear5Constant = 192;
 uint8_t Tolerance = 1;
 
-// Define the size of the buffers used to store data
+// Buffer sizes
 #define VEHICLE_SPEED_RAW_BUFFER_SIZE 8
 #define ECU_BUFFER_SIZE 5
+#define IMMO_BUFFER_SIZE 55
 
-// Declare the buffers used to store data
+// Buffers
 byte Vehicle_Speed_Raw_Buffer[VEHICLE_SPEED_RAW_BUFFER_SIZE];
 byte ECU_Buffer[ECU_BUFFER_SIZE];
-byte IMMO_Buffer[IMMO_BUFFER_SIZE]; // IMMO sequence buffer
+byte IMMO_Buffer[IMMO_BUFFER_SIZE];
 
-// Declare variables to keep track of buffer indices and time
+// Buffer indices and time variables
 byte VehicleSpeedRawBufferIndex = 0;
-byte ECUBufferIndex = 0; // Index for ECU_Buffer
-byte IMMOIndex = 0;      // Index for IMMO_Buffer
-unsigned long lastByteTime = 0;
-unsigned long immoSeqEndTime = 0;
-unsigned long lastDataTime = 0;
+byte ECUBufferIndex = 0;
+byte IMMOIndex = 0;
+auto lastByteTime = 0;
 
-// Declare flags to track the state of the communication
-bool isIMMOSeq = false;
+// Communication flags
+bool isIMMOHandled = false;
+bool isIMMOInProgress = false;
 bool DiagIsStarting = false;
 bool NormalOperation = false;
-bool isIMMOHandled = false;
+bool frameEndDetected = false;
 
-// Global variable for enabling debugging
-bool enableDebugging = true; // Set to false to disable debugging
+
+// Function declarations
+void readSerialData();
+void processSerialByte(byte incomingByte);
+void handleIMMOSequence(byte incomingByte);
+void handleDiagStart(byte incomingByte);
+void HandleNormalOperation(byte incomingByte);
+void handleBikeOffCondition();
+void processECUData();
+void calculateRPM();
+void calculateVehicleSpeed();
+void calculateCoolantTemp();
+void calculateGear();
+
 
 void setup()
 {
@@ -78,41 +78,41 @@ void setup()
     {
         Serial.println("Failed to start BLE");
     }
+
 }
 
-// Main Serial function
-void ReadSerialData()
+void loop()
+{
+    handleBikeOffCondition();
+    readSerialData();
+}
+
+void readSerialData()
 {
     if (Serial1.available())
     {
         byte incomingByte = Serial1.read();
         processSerialByte(incomingByte);
+
+        // Update the timestamp of the last received byte
+        lastByteTime = esp_timer_get_time();
     }
 }
 
-// Original function to handle serial data
+// Process each byte received from the serial port
 void processSerialByte(byte incomingByte)
 {
-    lastDataTime = millis(); // Update lastDataTime when a byte is received
-
-    // Debug print for every byte received
-    Serial.print("Received Byte: 0x");
-    Serial.println(incomingByte, HEX);
 
     // First handle any ongoing IMMO sequence
-    if (isIMMOSeq || incomingByte == IMMO_START_BYTE)
+    if (!isIMMOHandled)
     {
         handleIMMOSequence(incomingByte);
-        return;
     }
-
     // Next Handle DiagStart sequence
-    if (DiagIsStarting)
+    if (!DiagIsStarting && incomingByte == DIAG_START_BYTE)
     {
-        processSerialByte(incomingByte);
-        return;
+        handleDiagStart(incomingByte);
     }
-
     // Proceed only if NormalOperation is flagged true
     if (NormalOperation)
     {
@@ -120,109 +120,94 @@ void processSerialByte(byte incomingByte)
     }
 }
 
-// Function to handle the IMMO sequence
-void handleIMMOSequence(byte incomingByte)
-{
-    // Check if the IMMO sequence has not been handled yet
-    if (!isIMMOHandled)
-    {
-        // Check if the incoming byte matches the IMMO start byte
-        if (incomingByte == IMMO_START_BYTE)
-        {
-            Serial.println("IMMO Start Detected, Starting IMMO Sequence");
-            IMMOIndex = 0;
-            isIMMOSeq = true;
-            isIMMOHandled = true; // Mark the IMMO sequence as handled
-        }
-        else
-        {
-            // Ignore junk bytes before IMMO Start by returning early
-            return;
-        }
+void handleIMMOSequence(byte incomingByte) {
+    // Check if the incoming byte is the start of the IMMO sequence
+    if (incomingByte == IMMO_START_BYTE && !isIMMOInProgress) {
+        Serial.println("IMMO Start Detected, Starting IMMO Sequence");
+        isIMMOInProgress = true; // Set flag to indicate IMMO sequence is in progress
+        IMMOIndex = 0; // Reset the buffer index
     }
 
-    // Check if the IMMO sequence is in progress
-    if (isIMMOSeq)
-    {
-        IMMO_Buffer[IMMOIndex++] = incomingByte;
+    // Process IMMO bytes if the IMMO sequence is in progress
+    if (isIMMOInProgress) {
+        // Add the incoming byte to the buffer
+        IMMO_Buffer[IMMOIndex] = incomingByte;
+        // Increment the buffer index after storing the byte
+        IMMOIndex++;
 
         // Check if the IMMO buffer is full
-        if (IMMOIndex >= IMMO_BUFFER_SIZE)
-        {
-            Serial.println("IMMO End, Processing IMMO Data");
-            IMMOIndex = 0;
-
-            // Check the last byte in IMMO_Buffer
-            byte lastImmoByte = IMMO_Buffer[IMMO_BUFFER_SIZE - 1];
-            if (lastImmoByte == DIAG_START_BYTE)
-            {
-                DiagIsStarting = true;
-                Serial.println("Diagnostic Menu Starting");
-            }
-            else if (lastImmoByte == NORMAL_OPERATION)
-            {
-                NormalOperation = true;
-                // ECU_Buffer[0] = 0xFE;
-                Serial.println("Normal Operation Detected");
-            }
-
-            isIMMOSeq = false;
-            // Set PIDS to zero, Ready for Normal Operation
-            Speed_PID = 0;
-            Gear_PID = 0;
-            Coolant_PID = 0;
+        if (IMMOIndex >= IMMO_BUFFER_SIZE) {
+            isIMMOHandled = true; // Set IMMO handled flag
+            isIMMOInProgress = false; // Reset IMMO in progress flag
         }
+
+        // Check the last byte in IMMO_Buffer
+        byte lastImmoByte = IMMO_Buffer[IMMOIndex - 1];
+        if (lastImmoByte == DIAG_START_BYTE) {
+            DiagIsStarting = true;
+            Serial.println("Diagnostic Menu Starting");
+            isIMMOHandled = true; // Set IMMO handled if diagnostic menu starts
+            isIMMOInProgress = false; // Reset IMMO in progress flag
+        } else if (lastImmoByte == NORMAL_OPERATION) {
+            NormalOperation = true;
+            Serial.println("Normal Operation Detected");
+            isIMMOHandled = true; // Set IMMO handled if normal operation starts
+            isIMMOInProgress = false; // Reset IMMO in progress flag
+        }
+
+        // Set PIDs to zero, Ready for Normal Operation
+        Speed_PID = 0;
+        Gear_PID = 0;
+        Coolant_PID = 0;
     }
 }
 
-// Function to handle the DiagStart sequence
+/// Function to handle the DiagStart sequence
 void handleDiagStart(byte incomingByte)
 {
-    // Print message indicating DIAG Menu initialization
-    Serial.println("DIAG Menu init");
+    // Get the current time in microseconds
+    auto currentTime = esp_timer_get_time();
+
+    // Calculate the time elapsed since the last byte was received
+    auto timeElapsed = currentTime - lastByteTime;
+
+    // Check if it's time to consider the DiagStart sequence
+    if (DiagIsStarting && timeElapsed > BIKE_OFF_TIMEOUT_TIMER)
+    {
+        // Print message indicating DIAG Menu initialization
+        Serial.println("DIAG Menu init");
+    }
 }
-// Function to handle normal operation
-void HandleNormalOperation(byte incomingByte)
-{
-    // If the buffer is not full, add the incoming byte
-    if (ECUBufferIndex < ECU_BUFFER_SIZE)
-    {
-        ECU_Buffer[ECUBufferIndex++] = incomingByte;
-        Serial.print("Byte Added to ECU_BUFFER: 0x");
-        Serial.println(incomingByte, HEX);
-    }
 
-    // Check if it's time to process or reset the data
-    if (millis() - lastByteTime > FRAME_END_THRESHOLD)
-    {
-        Serial.println("FRAME_END_THRESHOLD occurred");
+// Function to handle the normal operation sequence
+void HandleNormalOperation(byte incomingByte) {
+    // Fill the buffer with incoming bytes
+    ECU_Buffer[ECUBufferIndex++] = incomingByte;
 
-        if (ECUBufferIndex == ECU_BUFFER_SIZE)
-        {
-            // Buffer is full, process the data
-            processECUData();
+    // Check if the buffer contains at least 5 bytes
+    if (ECUBufferIndex == ECU_BUFFER_SIZE) {
+        // Calculate the checksum by summing the first 4 bytes in the buffer
+        byte checksum = ECU_Buffer[0] + ECU_Buffer[1] + ECU_Buffer[2] + ECU_Buffer[3];
+        
+        // Compare the calculated checksum with the checksum byte (5th byte) in the buffer
+        if (checksum == ECU_Buffer[4]) {
+            // If the checksum is valid, process the ECU data
+            processECUData(); 
+            
+            // Reset the buffer index to 0 for the next frame
+            ECUBufferIndex = 0;
+        } else {
+            // If the checksum is not valid
+            // Shift bytes to the left to ensure the VehicleSpeed has new data
+            for (int i = 0; i < 4; i++) {
+                ECU_Buffer[i] = ECU_Buffer[i + 1];
+            }
+            // Decrement the buffer index after shifting
+            ECUBufferIndex--;
         }
-        // Whether the buffer was full or not, reset the buffer index for new data
-        ECUBufferIndex = 0;
-        Serial.println("ECU_BUFFER Reset");
     }
-
-    // Byte shifting logic to ensure only the last ECU_BUFFER_SIZE bytes are kept
-    if (ECUBufferIndex == ECU_BUFFER_SIZE)
-    {
-        Serial.println("Bytes Shifted in ECU_BUFFER");
-        // Shift all bytes in the buffer to the left by one position
-        for (int i = 0; i < ECU_BUFFER_SIZE - 1; i++)
-        {
-            ECU_Buffer[i] = ECU_Buffer[i + 1];
-        }
-
-        // Insert the new byte at the end of the buffer
-        ECU_Buffer[ECU_BUFFER_SIZE - 1] = incomingByte;
-    }
-
-    lastByteTime = millis(); // Update lastByteTime
 }
+
 
 // Function to process the ECU data
 void processECUData()
@@ -245,13 +230,30 @@ void processECUData()
 // Function to handle the bike off condition
 void handleBikeOffCondition()
 {
-    if ((millis() - lastDataTime > BIKE_OFF_TIMEOUT) && (lastDataTime != 0))
+    // Check if lastByteTime is not 0
+    if (lastByteTime != 0)
     {
-        isIMMOSeq = false;
-        DiagIsStarting = false;
-        isIMMOHandled = false;
-        lastDataTime = 0;
-        Serial.println("Bike Off Detected");
+        // Get the current time in microseconds
+        auto currentTime = esp_timer_get_time();
+ 
+        // Calculate the time elapsed since the last byte was received
+        auto timeElapsed = currentTime - lastByteTime;
+        // Check if it's time to consider the bike off condition
+        if (timeElapsed > BIKE_OFF_TIMEOUT_TIMER)
+        {
+            // Reset flags and variables related to bike off condition
+            bool isIMMOHandled = false;
+            bool isIMMOInProgress = false;
+            bool DiagIsStarting = false;
+            bool NormalOperation = false;
+            bool frameEndDetected = false;
+            ECUBufferIndex = 0;
+            // Reset lastByteTime to 0
+            lastByteTime = 0;
+ 
+            // Print message indicating bike off condition detected
+            Serial.println("Bike Off Detected");
+        }
     }
 }
 
@@ -344,8 +346,3 @@ void calculateGear()
     Gear_PID = Gear_PID * 1000;
 }
 
-void loop()
-{
-    handleBikeOffCondition();
-    ReadSerialData();
-}
