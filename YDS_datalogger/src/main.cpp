@@ -9,8 +9,7 @@
 // Time thresholds and timeouts
 const unsigned long FRAME_END_THRESHOLD_TIMER = 3000; // 5 milliseconds in microseconds
 const unsigned long DIAG_START_TIMEOUT_TIMER = 2000000;   // 2 seconds
-const unsigned long BIKE_OFF_TIMEOUT_TIMER = 5000000;  // 5 seconds in microseconds
-
+const unsigned long BIKE_OFF_TIMEOUT_TIMER = 9000000;  // 5 seconds in microseconds
 
 // Magic numbers
 const byte IMMO_START_BYTE = 0x3E;
@@ -18,7 +17,7 @@ const byte DIAG_START_BYTE = 0xCD;
 const byte NORMAL_OPERATION = 0xFE;
 
 // Debugging
-bool enableDebugging = true; // Set to false to disable debugging
+#define DEBUG_LEVEL 0
 
 // Gear detection constants
 uint8_t Gear1Constant = 61;
@@ -51,8 +50,9 @@ bool DiagIsStarting = false;
 bool NormalOperation = false;
 bool frameEndDetected = false;
 
-
 // Function declarations
+void setup();
+void loop();
 void readSerialData();
 void processSerialByte(byte incomingByte);
 void handleIMMOSequence(byte incomingByte);
@@ -62,9 +62,9 @@ void handleBikeOffCondition();
 void processECUData();
 void calculateRPM();
 void calculateVehicleSpeed();
+void extractErrorCode();
 void calculateCoolantTemp();
 void calculateGear();
-
 
 void setup()
 {
@@ -78,7 +78,6 @@ void setup()
     {
         Serial.println("Failed to start BLE");
     }
-
 }
 
 void loop()
@@ -102,7 +101,6 @@ void readSerialData()
 // Process each byte received from the serial port
 void processSerialByte(byte incomingByte)
 {
-
     // First handle any ongoing IMMO sequence
     if (!isIMMOHandled)
     {
@@ -120,49 +118,50 @@ void processSerialByte(byte incomingByte)
     }
 }
 
-void handleIMMOSequence(byte incomingByte) {
+void handleIMMOSequence(byte incomingByte)
+{
     // Check if the incoming byte is the start of the IMMO sequence
-    if (incomingByte == IMMO_START_BYTE && !isIMMOInProgress) {
+    if (incomingByte == IMMO_START_BYTE && !isIMMOInProgress)
+    {
         Serial.println("IMMO Start Detected, Starting IMMO Sequence");
         isIMMOInProgress = true; // Set flag to indicate IMMO sequence is in progress
-        IMMOIndex = 0; // Reset the buffer index
+        IMMOIndex = 0;           // Reset the buffer index
     }
 
     // Process IMMO bytes if the IMMO sequence is in progress
-    if (isIMMOInProgress) {
+    if (isIMMOInProgress)
+    {
         // Add the incoming byte to the buffer
         IMMO_Buffer[IMMOIndex] = incomingByte;
         // Increment the buffer index after storing the byte
         IMMOIndex++;
 
         // Check if the IMMO buffer is full
-        if (IMMOIndex >= IMMO_BUFFER_SIZE) {
-            isIMMOHandled = true; // Set IMMO handled flag
+        if (IMMOIndex >= IMMO_BUFFER_SIZE)
+        {
+            isIMMOHandled = true;     // Set IMMO handled flag
             isIMMOInProgress = false; // Reset IMMO in progress flag
         }
 
         // Check the last byte in IMMO_Buffer
         byte lastImmoByte = IMMO_Buffer[IMMOIndex - 1];
-        if (lastImmoByte == DIAG_START_BYTE) {
+        if (lastImmoByte == DIAG_START_BYTE)
+        {
             DiagIsStarting = true;
             Serial.println("Diagnostic Menu Starting");
-            isIMMOHandled = true; // Set IMMO handled if diagnostic menu starts
-            isIMMOInProgress = false; // Reset IMMO in progress flag
-        } else if (lastImmoByte == NORMAL_OPERATION) {
-            NormalOperation = true;
-            Serial.println("Normal Operation Detected");
-            isIMMOHandled = true; // Set IMMO handled if normal operation starts
+            isIMMOHandled = true;     // Set IMMO handled if diagnostic menu starts
             isIMMOInProgress = false; // Reset IMMO in progress flag
         }
-
-        // Set PIDs to zero, Ready for Normal Operation
-        Speed_PID = 0;
-        Gear_PID = 0;
-        Coolant_PID = 0;
+        else if (lastImmoByte == NORMAL_OPERATION)
+        {
+            NormalOperation = true;
+            Serial.println("Normal Operation Detected");
+            isIMMOHandled = true;     // Set IMMO handled if normal operation starts
+            isIMMOInProgress = false; // Reset IMMO in progress flag
+        }
     }
 }
 
-/// Function to handle the DiagStart sequence
 void handleDiagStart(byte incomingByte)
 {
     // Get the current time in microseconds
@@ -179,27 +178,32 @@ void handleDiagStart(byte incomingByte)
     }
 }
 
-// Function to handle the normal operation sequence
-void HandleNormalOperation(byte incomingByte) {
+void HandleNormalOperation(byte incomingByte)
+{
     // Fill the buffer with incoming bytes
     ECU_Buffer[ECUBufferIndex++] = incomingByte;
 
     // Check if the buffer contains at least 5 bytes
-    if (ECUBufferIndex == ECU_BUFFER_SIZE) {
+    if (ECUBufferIndex == ECU_BUFFER_SIZE)
+    {
         // Calculate the checksum by summing the first 4 bytes in the buffer
         byte checksum = ECU_Buffer[0] + ECU_Buffer[1] + ECU_Buffer[2] + ECU_Buffer[3];
-        
+
         // Compare the calculated checksum with the checksum byte (5th byte) in the buffer
-        if (checksum == ECU_Buffer[4]) {
+        if (checksum == ECU_Buffer[4])
+        {
             // If the checksum is valid, process the ECU data
-            processECUData(); 
-            
+            processECUData();
+
             // Reset the buffer index to 0 for the next frame
             ECUBufferIndex = 0;
-        } else {
+        }
+        else
+        {
             // If the checksum is not valid
             // Shift bytes to the left to ensure the VehicleSpeed has new data
-            for (int i = 0; i < 4; i++) {
+            for (int i = 0; i < 4; i++)
+            {
                 ECU_Buffer[i] = ECU_Buffer[i + 1];
             }
             // Decrement the buffer index after shifting
@@ -208,26 +212,29 @@ void HandleNormalOperation(byte incomingByte) {
     }
 }
 
-
-// Function to process the ECU data
 void processECUData()
 {
     calculateRPM();
-    calculateCoolantTemp();
     calculateVehicleSpeed();
+    extractErrorCode();
+    calculateCoolantTemp();
+    calculateGear();
 
-    if (enableDebugging)
+    if (DEBUG_LEVEL >= 1)
     {
         Serial.print("RPM: ");
         Serial.println(RPM_PID);
-        Serial.print("Coolant Temp: ");
-        Serial.println(Coolant_PID);
         Serial.print("Vehicle Speed: ");
         Serial.println(Speed_PID);
+        Serial.print("Current Gear: ");
+        Serial.println(Gear_PID);
+        Serial.print("Coolant Temp: ");
+        Serial.println(Coolant_PID);
+        Serial.print("Error Code: ");
+        Serial.println(Error_PID);
     }
 }
 
-// Function to handle the bike off condition
 void handleBikeOffCondition()
 {
     // Check if lastByteTime is not 0
@@ -235,7 +242,7 @@ void handleBikeOffCondition()
     {
         // Get the current time in microseconds
         auto currentTime = esp_timer_get_time();
- 
+
         // Calculate the time elapsed since the last byte was received
         auto timeElapsed = currentTime - lastByteTime;
         // Check if it's time to consider the bike off condition
@@ -248,24 +255,26 @@ void handleBikeOffCondition()
             bool NormalOperation = false;
             bool frameEndDetected = false;
             ECUBufferIndex = 0;
-            // Reset lastByteTime to 0
             lastByteTime = 0;
- 
+
             // Print message indicating bike off condition detected
             Serial.println("Bike Off Detected");
         }
     }
 }
 
-// Function to calculate RPM from the ECU data
 void calculateRPM()
 {
-    uint16_t RPM = ECU_Buffer[0] * 50; // Adjusted multiplication factor
-    RPM = RPM / 4;                     // Adjusted division factor
+    // Extract RPM data from the ECU buffer
+    uint16_t RPM = ECU_Buffer[0];
+
+    // Adjust RPM using the multiplication factor
+    RPM *= 50; // Adjusted ECU multiplication factor
+
+    // Assign the adjusted RPM directly to RPM_PID
     RPM_PID = RPM;
 }
 
-// Function to calculate vehicle speed from the ECU data
 void calculateVehicleSpeed()
 {
     // Store the byte in the buffer
@@ -273,76 +282,74 @@ void calculateVehicleSpeed()
     // Check if the buffer is full
     if (VehicleSpeedRawBufferIndex == VEHICLE_SPEED_RAW_BUFFER_SIZE)
     {
-        int sum = 0;
+        int totalSpeed = 0; // Renamed variable for clarity
         for (int i = 0; i < VEHICLE_SPEED_RAW_BUFFER_SIZE; ++i)
         {
-            sum += Vehicle_Speed_Raw_Buffer[i];
+            totalSpeed += Vehicle_Speed_Raw_Buffer[i]; // Accumulate speed data
         }
 
-        // Store the sum directly in Speed_PID
-        Speed_PID = sum;
+        // Store the total speed directly in Speed_PID
+        Speed_PID = totalSpeed;
 
         // Reset the buffer index for the next set of data
         VehicleSpeedRawBufferIndex = 0;
     }
 }
 
-// Function to calculate coolant temperature from the ECU data
+void extractErrorCode()
+{
+    // Extract the Error Code from the ECU data
+    uint8_t Error = ECU_Buffer[2];
+    Error_PID = Error;
+}
+
+
 void calculateCoolantTemp()
 {
     uint8_t coolantTemp = ECU_Buffer[3];
-
-    // Add 40 to coolantTemp
-    coolantTemp = coolantTemp + 40;
 
     // Store the result in Coolant_PID
     Coolant_PID = coolantTemp;
 }
 
-// Function to calculate gear and convert it to ODB standard
 void calculateGear()
 {
     // Check if either Speed_PID or RPM_PID is zero
     if (Speed_PID == 0 || RPM_PID == 0)
     {
-        Gear_PID = 0; // Neutral gear if speed or RPM is zero
+        Gear_PID = 0x00; // Neutral gear if speed or RPM is zero
         return;
     }
 
     // Calculate the CurrentGear based on Speed and RPM
-    uint16_t CurrentGear;
-
-    CurrentGear = static_cast<uint16_t>((30 / 1200) * 10000);
+    uint16_t CurrentGear = RPM_PID / Speed_PID;
 
     // Determine the gear based on CurrentGear and gear variations
-    Gear_PID = 0; // Default to an undefined gear
+    Gear_PID = 0x00; // Default to an undefined gear
 
     if (abs(CurrentGear - Gear1Constant) <= Tolerance)
     {
-        Gear_PID = 1; // Vehicle is in 1st gear
+        Gear_PID = 0x01; // Vehicle is in 1st gear
     }
     else if (abs(CurrentGear - Gear2Constant) <= Tolerance)
     {
-        Gear_PID = 2; // Vehicle is in 2nd gear
+        Gear_PID = 0x02; // Vehicle is in 2nd gear
     }
     else if (abs(CurrentGear - Gear3Constant) <= Tolerance)
     {
-        Gear_PID = 3; // Vehicle is in 3rd gear
+        Gear_PID = 0x03; // Vehicle is in 3rd gear
     }
     else if (abs(CurrentGear - Gear4Constant) <= Tolerance)
     {
-        Gear_PID = 4; // Vehicle is in 4th gear
+        Gear_PID = 0x04; // Vehicle is in 4th gear
     }
     else if (abs(CurrentGear - Gear5Constant) <= Tolerance)
     {
-        Gear_PID = 5; // Vehicle is in 5th gear
+        Gear_PID = 0x05; // Vehicle is in 5th gear
     }
     else
     {
-        Gear_PID = 0; // Neutral gear as a failsafe
+        Gear_PID = 0x00; // Neutral gear as a failsafe
     }
-
-    // Convert Gear_pid to ODB standard
-    Gear_PID = Gear_PID * 1000;
 }
 
