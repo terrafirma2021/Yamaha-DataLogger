@@ -1,11 +1,31 @@
 #include <string>
-#include <BLE.h>
+#include <iostream>
+#include <iomanip>
+#include <sstream> // Include for std::ostringstream
 
 // Define the PIDs used to store data
-uint16_t RPM_PID;
-uint8_t Coolant_PID;
-uint8_t Speed_PID;
-uint16_t Gear_PID;
+uint16_t RPM_PID;    // RPM * 50 = RAW
+uint8_t Coolant_PID; // Temp = RAW
+uint8_t Speed_PID;   //= RAW km/h
+uint8_t Gear_PID;   //= RAW 00-05
+uint8_t Error_PID;  //= Error code
+
+
+// Function to convert a PID value to hexadecimal string
+template<typename T>
+std::string hexToString(T value) {
+    std::ostringstream stream;
+    // Determine the number of bytes in the type T
+    int numBytes = sizeof(T);
+    // Loop through each byte
+    for (int i = numBytes - 1; i >= 0; --i) {
+        // Extract the current byte
+        uint8_t byte = (value >> (i * 8)) & 0xFF;
+        // Append the byte as hexadecimal to the stream
+        stream << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(byte);
+    }
+    return stream.str();
+}
 
 std::string handleCommand(const std::string &command) {
     std::string response;
@@ -13,28 +33,25 @@ std::string handleCommand(const std::string &command) {
     if (command == "ATI" || command == "AT@1") {
         response = "ELM327 v2.1";
     } else if (command == "ATS1" || command == "AT S1") {
-        Device::getInstance().handleATSCommand = true; // Turn Spaces On
+        // Implementation for ATS1
         response = "OK";
     } else if (command == "ATS0" || command == "AT S0") {
-        Device::getInstance().handleATSCommand = false; // Turn Spaces Off
+        // Implementation for ATS0
         response = "OK";
     } else if (command == "ATH1" || command == "AT H1") {
-        Device::getInstance().handleATHCommand = true;
-        Device::getInstance().setATH1Active(true); // Set ATH1 active
+        // Implementation for ATH1
         response = "OK";
     } else if (command == "ATH0" || command == "AT H0") {
-        Device::getInstance().handleATHCommand = false;
-        Device::getInstance().setATH1Active(false); // Reset ATH1 active
+        // Implementation for ATH0
         response = "OK";
-    } else if (command == "ATZ") { // Reset
-        Device::getInstance().handleATHCommand = false;
-        Device::getInstance().setATH1Active(false);
-        Device::getInstance().handleATSCommand = false;
+    } else if (command == "ATZ") {
+        // Implementation for ATZ
         response = "OK";
-    } else if (command == "ATE0" || command == "ATPC" || command == "ATM0" ||
-               command == "ATL0" || command == "ATST62" || command == "ATSP0" ||
-               command == "ATSP0" || command == "ATAT1" || command == "ATAT2" ||
-               command == "ATAT2" || command == "ATSP6" || command == "ATSPA6") {
+    } else if (command == "ATE0"  || command == "ATD"   || command == "ATPC"  ||
+               command == "ATM0"  || command == "ATL0"  || command == "ATST62" ||
+               command == "ATSP0" || command == "ATSP0" || command == "ATAT1" ||
+               command == "ATAT2" || command == "ATAT2" || command == "ATSP6" ||
+               command == "ATSPA6") {
         response = "OK";
     } else if (command == "ATDPN") {
         response = "6"; // Protocol Number 6 CAN bus
@@ -53,13 +70,21 @@ std::string handleCommand(const std::string &command) {
     } else if (command == "01C0") { // PID 7 - Supported PIDs [C1-E0]
         response = "41 C0 NO DATA";
     } else if (command == "0105") { // Engine Coolant Temperature (PID 0105)
-        response = "41 05 " + std::to_string(Coolant_PID);
+        response = "41 05 " + hexToString(Coolant_PID);
+    } else if (command == "0105 1") { // Engine Coolant Temperature (PID 0105)  // Race chrono +1 response
+        response = "41 05 " + hexToString(Coolant_PID);
     } else if (command == "010C") { // RPM (PID 010C)
-        response = "41 0C " + std::to_string(RPM_PID);
+        response = "41 0C " + hexToString(RPM_PID);
+    } else if (command == "010C 1") { // RPM (PID 010C) // race chrono +1 response
+        response = "41 0C " + hexToString(RPM_PID);
     } else if (command == "010D") { // Vehicle Speed (PID 010D)
-        response = "41 0D " + std::to_string(Speed_PID);
+        response = "41 0D " + hexToString(Speed_PID);
+    } else if (command == "010D 1") { // Vehicle Speed (PID 010D) // race chrono +1 response
+        response = "41 0D " + hexToString(Speed_PID);
     } else if (command == "01A4") { // Transmission Actual Gear (PID 01A4)
-        response = "41 0D 0" + std::to_string(Gear_PID);
+        response = "41 A4 " + hexToString(Gear_PID);
+    } else if (command == "01A4 1") { // Transmission Actual Gear (PID 01A4) // +1
+        response = "41 A4 " + hexToString(Gear_PID);
     } else if (command == "0902") { // VIN (PID 0902)
         response = "49 02 00 00 59 41 4D 41 48 41 45 53 50 33 32 4F 44 42";
     } else if (command == "0904") { // Calibration ID (PID 0904)
@@ -68,9 +93,13 @@ std::string handleCommand(const std::string &command) {
         response = "49 0A 45 53 50 33 32 37 45 6D 75 6C 61 74 6F 72 00 00 00 00 00 00";
     } else if (command == "01009") { // ???
         response = "41 009 NO DATA";
+    } else if (command == "0901 1") { // Error code ( Custom PID 0909) // +1
+        response = "41 02 " + hexToString(Error_PID);
+    } else if (command == "0102") { // Error code ( Custom PID 0909)
+        response = "41 02 " + hexToString(Error_PID);
     } else {
-#if DEBUG_LEVEL >= 1
-        Serial.println(("Unknown command or length mismatch. Received: " + command).c_str());
+    #if DEBUG_LEVEL >= 1
+        std::cout << "Unknown command or length mismatch. Received: " << command << std::endl;
 #endif
     }
 
