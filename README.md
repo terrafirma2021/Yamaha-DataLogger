@@ -7,6 +7,9 @@ The Yamaha DataLogger is an ESP32-based device designed to convert data received
 #### Added Files:
 - Added Ecu Emulator for testing
 - Added Torque app PID.csv
+- Wowki PCB Design
+- My custom PCB build
+- L9637d pinout
 
 
 
