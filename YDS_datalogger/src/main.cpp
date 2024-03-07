@@ -258,7 +258,7 @@ void processECUData()
     calculateVehicleSpeed();
     extractErrorCode();
     calculateCoolantTemp();
-    handleCurrentGearPID();
+    handleCurrentGearPID(nvs_data_read);
 
     if (DEBUG_LEVEL >= 1)
     {
