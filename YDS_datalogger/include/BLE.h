@@ -15,11 +15,9 @@ const uint16_t ELM327_RX_UUID = 0xFFF1;
 const uint16_t ELM327_TX_UUID = 0xFFF2;
 
 // UART Service and Characteristic UUIDs
-//const char UART_SERVICE_UUID[] = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
-//const char UART_RX_UUID[] = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
-//const char UART_TX_UUID[] = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
-
-
+const char UART_SERVICE_UUID[] = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+const char UART_RX_UUID[] = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+const char UART_TX_UUID[] = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
 
 class Device final : public BLEServerCallbacks
 {
@@ -58,27 +56,35 @@ public:
         txCharacteristic->setCallbacks(callbacks);
 
         // UART Service and Characteristics
-        //BLEUUID uartServiceUUID = BLEUUID(UART_SERVICE_UUID);
-        //BLEService *uartService = server->createService(uartServiceUUID);
+        BLEUUID uartServiceUUID = BLEUUID(UART_SERVICE_UUID);
+        BLEService *uartService = server->createService(uartServiceUUID);
 
-        //BLECharacteristic *uartRxCharacteristic = uartService->createCharacteristic(
-        //    BLEUUID(UART_RX_UUID),
-        //    BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
-        //uartRxCharacteristic->addDescriptor(new BLE2902());
+        if (uartService != nullptr) {
+            uartRxCharacteristic = uartService->createCharacteristic(
+                BLEUUID(UART_RX_UUID),
+                BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+            if (uartRxCharacteristic != nullptr) {
+                uartRxCharacteristic->addDescriptor(new BLE2902());
+                uartRxCharacteristic->setCallbacks(callbacks);
+            }
 
-        //BLECharacteristic *uartTxCharacteristic = uartService->createCharacteristic(
-        //    BLEUUID(UART_TX_UUID),
-        //    BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_INDICATE);
-        //uartTxCharacteristic->addDescriptor(new BLE2902());
-
-        //uartRxCharacteristic->setCallbacks(callbacks);
+            uartTxCharacteristic = uartService->createCharacteristic(
+                BLEUUID(UART_TX_UUID),
+                BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_INDICATE);
+            if (uartTxCharacteristic != nullptr) {
+                uartTxCharacteristic->addDescriptor(new BLE2902());
+            }
+        }
 
         service->start();
-        //uartService->start();
+        if (uartService != nullptr) {
+            uartService->start();
+        }
         setupAdvertising();
 
         return true;
     }
+
     // BLE Server Callback Methods
     void send(const char *data) noexcept
     {
@@ -122,7 +128,8 @@ public:
 private:
     Device() noexcept
         : server(nullptr), service(nullptr), rxCharacteristic(nullptr),
-          txCharacteristic(nullptr), clientConnected(false) {}
+          txCharacteristic(nullptr), uartRxCharacteristic(nullptr),
+          uartTxCharacteristic(nullptr), clientConnected(false) {}
 
     BLECharacteristic *createCharacteristic(uint16_t uuid, uint32_t properties)
     {
@@ -143,10 +150,10 @@ private:
     BLEService *service;
     BLECharacteristic *rxCharacteristic;
     BLECharacteristic *txCharacteristic;
+    BLECharacteristic *uartRxCharacteristic = nullptr;
+    BLECharacteristic *uartTxCharacteristic = nullptr;
     bool clientConnected;
 };
-
-
 
 // Handle the BLE 
 class MyCallbacks : public BLECharacteristicCallbacks
