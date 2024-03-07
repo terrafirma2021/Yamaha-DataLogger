@@ -29,5 +29,6 @@ To build this project, you will need the following components:
 
 #### Additional Information:
 - It's possible to pozi-tap the loom for other sensor data not sent via the k-line.
+- Wokwi circuit design: https://wokwi.com/projects/391712730296045569
 
 ![Screenshot](https://raw.githubusercontent.com/terrafirma2021/Yamaha-DataLogger/main/Screenshot_20240306_113752_Torque.jpg)
