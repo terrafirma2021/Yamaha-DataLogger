@@ -12,6 +12,9 @@ The Yamaha DataLogger is an ESP32-based device designed to convert data received
 - L9637d pinout
 
 
+#### Added LCD Support:
+0.96" I2C
+
 
 #### Supported PIDs:
 - RPM
