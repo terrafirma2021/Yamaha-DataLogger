@@ -3,13 +3,11 @@
 #include <iomanip>
 #include <sstream> // Include for std::ostringstream
 
-// Define the PIDs used to store data
-uint16_t RPM_PID;    // RPM * 50 = RAW
-uint8_t Coolant_PID; // Temp = RAW
-uint8_t Speed_PID;   //= RAW km/h
-uint8_t Gear_PID;   //= RAW 00-05
-uint8_t Error_PID;  //= Error code
-
+extern uint16_t RPM_PID;    // RPM * 50 = RAW
+extern uint8_t Coolant_PID; // Temp = RAW
+extern uint8_t Speed_PID;   // RAW km/h
+extern uint8_t Gear_PID;    // RAW 00-05
+extern uint8_t Error_PID;   // Error code
 
 // Function to convert a PID value to hexadecimal string
 template<typename T>
