@@ -6,6 +6,10 @@
 #include "esp_timer.h"
 #include "nvs_flash.h"
 #include "nvs.h"
+#include <LCD.h>   
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h> 
+#include <U8g2lib.h>
 
 // Constants for L9637D pins
 #define YAM_TX 12
@@ -15,6 +19,7 @@
 const unsigned long FRAME_END_THRESHOLD_TIMER = 3000; // 5 milliseconds in microseconds
 const unsigned long DIAG_START_TIMEOUT_TIMER = 2000000;   // 2 seconds in microseconds
 const unsigned long BIKE_OFF_TIMEOUT_TIMER = 9000000;  // 5 seconds in microseconds
+
 
 // Magic numbers
 const byte IMMO_START_BYTE = 0x3E;
@@ -38,7 +43,6 @@ byte IMMO_Buffer[IMMO_BUFFER_SIZE];
 byte VehicleSpeedRawBufferIndex = 0;
 byte ECUBufferIndex = 0;
 byte IMMOIndex = 0;
-auto lastByteTime = 0;
 
 // Communication flags
 bool isIMMOHandled = false;
@@ -106,6 +110,9 @@ void CalculateGear(uint16_t currentSpeed, uint16_t currentRpm);
 void handleCurrentGearPID(bool nvs_data_read);
 
 
+
+
+
 void setup()
 {
     delay(1000);
@@ -113,6 +120,7 @@ void setup()
     Serial1.begin(16040, SERIAL_8N1, YAM_RX, YAM_TX);
     Serial.println("Yamaha ELM327 Datalogger");
     MyCallbacks *myCallbacks = new MyCallbacks();
+    u8g2.begin();
     bool success = Device::getInstance().start(myCallbacks);
     if (!success)
     {
@@ -124,6 +132,9 @@ void loop()
 {
     handleBikeOffCondition();
     readSerialData();
+    displayData();
+    Device::getInstance().sendUart();
+
 }
 
 void readSerialData()
@@ -486,3 +497,4 @@ void handleCurrentGearPID(bool nvs_data_read) {
         Gear_PID = 0;
     }
 }
+
