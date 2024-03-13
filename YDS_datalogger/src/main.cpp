@@ -6,28 +6,27 @@
 #include "esp_timer.h"
 #include "nvs_flash.h"
 #include "nvs.h"
-#include <LCD.h>   
+#include <LCD.h>
 #include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h> 
+#include <Adafruit_SSD1306.h>
 #include <U8g2lib.h>
 
 // Constants for L9637D pins
 #define YAM_TX 12
 #define YAM_RX 33
 
-// Time thresholds and timeouts
-const unsigned long FRAME_END_THRESHOLD_TIMER = 3000; // 5 milliseconds in microseconds
-const unsigned long DIAG_START_TIMEOUT_TIMER = 2000000;   // 2 seconds in microseconds
-const unsigned long BIKE_OFF_TIMEOUT_TIMER = 9000000;  // 5 seconds in microseconds
+// Debug Level
+int DEBUG_LEVEL = 1;
 
+// Time thresholds and timeouts
+const unsigned long FRAME_END_THRESHOLD_TIMER = 3000;   // 5 milliseconds in microseconds
+const unsigned long DIAG_START_TIMEOUT_TIMER = 2000000; // 2 seconds in microseconds
+const unsigned long BIKE_OFF_TIMEOUT_TIMER = 9000000;   // 5 seconds in microseconds
 
 // Magic numbers
 const byte IMMO_START_BYTE = 0x3E;
 const byte DIAG_START_BYTE = 0xCD;
 const byte NORMAL_OPERATION = 0xFE;
-
-// Debugging
-#define DEBUG_LEVEL 0
 
 // Buffer sizes
 #define VEHICLE_SPEED_RAW_BUFFER_SIZE 8
@@ -65,13 +64,16 @@ void calculateRPM();
 void calculateVehicleSpeed();
 void extractErrorCode();
 void calculateCoolantTemp();
+void init_nvs();
+void handleCurrentGearPID(bool nvs_data_read);
+void CalculateGear(uint16_t currentSpeed, uint16_t currentRpm);
 
 // Calculate Gear Constants
-const uint16_t Gear_Vector_Size = 333;       // 15*333 = 4995 ms (Gear detection time)
-const uint8_t Gear_max = 6;                  // Maximum number of gears
-const uint8_t Neutral_Threshold = 10;        // Tolerance threshold for neutral detection (Speed) 
-const uint8_t Ratio_Threshold = 10;          // Threshold for detecting gear change based on ratio difference (Need to Tune)
-const uint32_t Gear5_Timer = 9000000;        // Timer duration for determining if the bike has 5 gears (9 seconds in microseconds)
+const uint16_t Gear_Vector_Size = 333; // 15*333 = 4995 ms (Gear detection time)
+const uint8_t Gear_max = 6;            // Maximum number of gears
+const uint8_t Neutral_Threshold = 10;  // Tolerance threshold for neutral detection (Speed)
+const uint8_t Ratio_Threshold = 10;    // Threshold for detecting gear change based on ratio difference (Need to Tune)
+const uint32_t Gear5_Timer = 9000000;  // Timer duration for determining if the bike has 5 gears (9 seconds in microseconds)
 
 // Calculate Gear variables
 uint8_t current_gear = 0;
@@ -82,6 +84,7 @@ bool gear_rpm_Flag = false;
 bool gear_speed_Flag = false;
 bool GearIs5 = false;
 bool GearsAreCalc = false;
+bool CalculateGear_Flag = false;
 
 // Gear Calculation
 byte gear_speed = 0;
@@ -109,9 +112,8 @@ void init_nvs();
 void CalculateGear(uint16_t currentSpeed, uint16_t currentRpm);
 void handleCurrentGearPID(bool nvs_data_read);
 
-
-
-
+// Disable Bike Timer
+bool DisableBikeOff_Flag = false;
 
 void setup()
 {
@@ -133,8 +135,7 @@ void loop()
     handleBikeOffCondition();
     readSerialData();
     displayData();
-    Device::getInstance().sendUart();
-
+    Device::getInstance().sendUart(); // Not returning correctly (TO FIX)
 }
 
 void readSerialData()
@@ -288,6 +289,10 @@ void processECUData()
 
 void handleBikeOffCondition()
 {
+    // Check if the bike off condition is disabled
+    if (DisableBikeOff_Flag)
+        return;
+
     // Check if lastByteTime is not 0
     if (lastByteTime != 0)
     {
@@ -328,7 +333,7 @@ void calculateRPM()
     // Assign the value to the calculateGear_RPM
     gear_rpm = RPM;
 
-    //Set Flag to tell Calculate Gear function new byte has arrived
+    // Set Flag to tell Calculate Gear function new byte has arrived
     bool gear_rpm_Flag = true;
 }
 
@@ -363,14 +368,12 @@ void calculateVehicleSpeed()
     }
 }
 
-
 void extractErrorCode()
 {
     // Extract the Error Code from the ECU data
     uint8_t Error = ECU_Buffer[2];
     Error_PID = Error;
 }
-
 
 void calculateCoolantTemp()
 {
@@ -381,9 +384,11 @@ void calculateCoolantTemp()
 }
 
 // Function to initialize NVS
-void init_nvs() {
+void init_nvs()
+{
     esp_err_t err = nvs_flash_init();
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND)
+    {
         ESP_ERROR_CHECK(nvs_flash_erase());
         err = nvs_flash_init();
     }
@@ -391,9 +396,12 @@ void init_nvs() {
 }
 
 // Function to calculate gear
-void CalculateGear(uint16_t currentSpeed, uint16_t currentRpm) {
+void CalculateGear(uint16_t currentSpeed, uint16_t currentRpm)
+{
     // Check if both gear_speed and gear_rpm are set before processing
-    if (gear_speed_Flag && gear_rpm_Flag && !GearsAreCalc) {
+    if (gear_speed_Flag && gear_rpm_Flag && CalculateGear_Flag && !GearsAreCalc)
+    {
+
         // Set the current speed and RPM
         gear_speed = currentSpeed;
         gear_rpm = currentRpm;
@@ -405,20 +413,24 @@ void CalculateGear(uint16_t currentSpeed, uint16_t currentRpm) {
         ratio_buffer.push_back(gear_Current_Ratio);
 
         // Check if the buffer is full
-        if (ratio_buffer.size() >= Gear_Vector_Size) {
+        if (ratio_buffer.size() >= Gear_Vector_Size)
+        {
             // Calculate the gear ratio for the current gear
             std::unordered_map<uint16_t, int> frequencyMap;
             uint16_t gearRatio = 0;
             int maxFrequency = 0;
 
             // Count frequency of each value in the dataset
-            for (const auto& value : ratio_buffer) {
+            for (const auto &value : ratio_buffer)
+            {
                 frequencyMap[value]++;
             }
 
             // Find the value with the highest frequency (mode)
-            for (const auto& pair : frequencyMap) {
-                if (pair.second > maxFrequency) {
+            for (const auto &pair : frequencyMap)
+            {
+                if (pair.second > maxFrequency)
+                {
                     maxFrequency = pair.second;
                     gearRatio = pair.first;
                 }
@@ -429,7 +441,8 @@ void CalculateGear(uint16_t currentSpeed, uint16_t currentRpm) {
             last_ratio[current_gear] = gearRatio;
 
             // Check for gear change based on ratio difference
-            if (std::abs(gear_Current_Ratio - last_ratio[current_gear]) > Ratio_Threshold) {
+            if (std::abs(gear_Current_Ratio - last_ratio[current_gear]) > Ratio_Threshold)
+            {
                 // Move to the next gear
                 current_gear = (current_gear + 1) % Gear_max;
                 // Clear the ratio buffer for the next gear
@@ -437,28 +450,34 @@ void CalculateGear(uint16_t currentSpeed, uint16_t currentRpm) {
             }
 
             // Start the timer for 5th gear if the 5th gear is reached
-            if (current_gear == 4 && !GearIs5) {
+            if (current_gear == 4 && !GearIs5)
+            {
                 gear5_timer_start = esp_timer_get_time();
             }
 
             // Check if gear information has been calculated for all gears
-            if (current_gear == 5) {
+            if (current_gear == 5)
+            {
                 // If the buffer reaches 6th gear before the timer expires or if the timer expires before the buffer reaches 6th gear, set the flag
-                if (!GearIs5 || (esp_timer_get_time() - gear5_timer_start) >= Gear5_Timer) {
+                if (!GearIs5 || (esp_timer_get_time() - gear5_timer_start) >= Gear5_Timer)
+                {
                     GearsAreCalc = true;
 
                     // Write current gear to NVS
-                    if (!nvs_data_read) {
+                    if (!nvs_data_read)
+                    {
                         nvs_handle_t nvs_handle;
                         esp_err_t err = nvs_open("storage", NVS_READWRITE, &nvs_handle);
-                        if (err != ESP_OK) {
+                        if (err != ESP_OK)
+                        {
                             printf("Error (%s) opening NVS handle!\n", esp_err_to_name(err));
                             return;
                         }
 
                         // Write current_gear value to NVS
                         err = nvs_set_u8(nvs_handle, "current_gear", current_gear);
-                        if (err != ESP_OK) {
+                        if (err != ESP_OK)
+                        {
                             printf("Error (%s) writing data to NVS!\n", esp_err_to_name(err));
                             nvs_close(nvs_handle);
                             return;
@@ -466,7 +485,8 @@ void CalculateGear(uint16_t currentSpeed, uint16_t currentRpm) {
 
                         // Commit the value written to NVS
                         err = nvs_commit(nvs_handle);
-                        if (err != ESP_OK) {
+                        if (err != ESP_OK)
+                        {
                             printf("Error (%s) committing data to NVS!\n", esp_err_to_name(err));
                         }
 
@@ -475,6 +495,9 @@ void CalculateGear(uint16_t currentSpeed, uint16_t currentRpm) {
 
                         // Update the flag after writing to NVS
                         nvs_data_read = true;
+
+                        // set Flags False
+                        CalculateGear_Flag = false;
                     }
                 }
             }
@@ -483,18 +506,21 @@ void CalculateGear(uint16_t currentSpeed, uint16_t currentRpm) {
 }
 
 // Function to handle current gear PID
-void handleCurrentGearPID(bool nvs_data_read) {
-    if (nvs_data_read) {
+void handleCurrentGearPID(bool nvs_data_read)
+{
+    if (nvs_data_read)
+    {
         // Compare gear_Current_Ratio with stored gear ratio
-        for (size_t i = 0; i < 6; ++i) { // Using the known size of the array (6)
-            if (gear_Current_Ratio == stored_gear_buffer[i]) {
+        for (size_t i = 0; i < 6; ++i)
+        { // Using the known size of the array (6)
+            if (gear_Current_Ratio == stored_gear_buffer[i])
+            {
                 // Set GEAR_PID to the index number of the matched value inside the stored_gear_buffer
                 Gear_PID = i;
                 return; // Exit the loop once a match is found
             }
         }
-        // If no match is found, set GEAR_PID to 0
+        // If no match is found, set GEAR_PID to 0 // Need to implement smoothing ideally to return less false neutral (TO DO!) 
         Gear_PID = 0;
     }
 }
-
