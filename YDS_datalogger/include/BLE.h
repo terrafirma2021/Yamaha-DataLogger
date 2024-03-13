@@ -6,7 +6,14 @@
 #include <BLECharacteristic.h>
 #include <BLEDevice.h>
 
+// debug
+extern int DEBUG_LEVEL;
 
+// forward declaration for CalculateGear_Flag;
+extern bool CalculateGear_Flag;
+
+// forward declaration for Disable bike timer
+extern bool DisableBikeOff_Flag;
 
 // Function declaration for handling commands
 std::string handleCommand(const std::string &command);
@@ -21,13 +28,7 @@ const char UART_SERVICE_UUID[] = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
 const char UART_RX[] = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
 const char UART_TX[] = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
 
-// Debug level for printing debug messages
-#define DEBUG_LEVEL 0
-
 class MyCallbacks;
-
-// Declare sendUart function outside of the class
-void sendUart();
 
 // Device class for handling BLE operations
 class Device final : public BLEServerCallbacks
@@ -245,17 +246,28 @@ class MyCallbacks : public BLECharacteristicCallbacks
 public:
     void onWrite(BLECharacteristic *characteristic) override
     {
-      
         if (characteristic == Device::getInstance().getUartTxCharacteristic())
         {
-            Device::getInstance().sendUart();
             // Handle UART TX characteristic data
             uint8_t *value = characteristic->getData();
             size_t len = characteristic->getLength();
 
-            for (size_t i = 0; i < len; i++)
+            // Assuming the command is a string
+            if (len > 0)
             {
-                Serial.print(static_cast<char>(value[i]));
+                // Convert the data into a string
+                String command = "";
+                for (size_t i = 0; i < len; ++i)
+                {
+                    // Exclude carriage return and line feed characters
+                    if (value[i] != '\r' && value[i] != '\n')
+                    {
+                        command += static_cast<char>(value[i]);
+                    }
+                }
+
+                // Call private function to dispatch the command
+                incomingCommands(command);
             }
         }
         else if (characteristic == Device::getInstance().getElm327TxCharacteristic())
@@ -264,6 +276,7 @@ public:
             uint8_t *value = characteristic->getData();
             size_t len = characteristic->getLength();
 
+            // Processing the received data (stripping leading/trailing whitespace, converting to uppercase, etc.)
             size_t start = 0;
             while (start < len && (value[start] == ' ' || value[start] == '\t' || value[start] == '\n' || value[start] == '\r'))
             {
@@ -301,8 +314,86 @@ public:
     }
 
 private:
-    // Function definition for sendUart
+    // Private function to dispatch commands
+    void incomingCommands(String command)
+    {
+        // Convert the command to uppercase for case-insensitive comparison
+        command.toUpperCase();
 
+        // Call corresponding functions based on the received command
+        if (command == "DEBUG OFF")
+        {
+            handleDebugOff();
+        }
+        else if (command == "DEBUG 1")
+        {
+            handleDebug1();
+        }
+        else if (command == "DEBUG 2")
+        {
+            handleDebug2();
+        }
+        else if (command == "RESET")
+        {
+            handleReset();
+        }
+        else if (command == "GEAR LEARN")
+        {
+            handleGearLearn();
+        }
+        else
+        {
+            // Do Nothing ;
+        }
+    }
+
+    // Define functions to handle different commands
+    void handleDebugOff()
+    {
+        DEBUG_LEVEL = 0;
+        Serial.println("Command Received: Debug Off");
+    }
+
+    void handleDebug1()
+    {
+        DEBUG_LEVEL = 1;
+        Serial.println("Command Received: Debug 1 Enabled");
+    }
+
+    void handleDebug2()
+    {
+        DEBUG_LEVEL = 2;
+        Serial.println("Command Received: Debug 2 Enabled");
+    }
+
+    void handleReset()
+    {
+        Serial.println("Command Received: Reset ESP");
+        ESP.restart();
+    }
+
+    void handleGearLearn()
+    {
+        // Set CalculateGear_Flag = true;
+        CalculateGear_Flag = true;
+        Serial.println("Command Received: Starting Gear Learning");
+        Serial.println("Read the tutorial on how to use this feature");
+    }
+
+    void enableBikeOff()
+    {
+        // Set CalculateGear_Flag = true;
+        DisableBikeOff_Flag = true;
+        Serial.println("Command Received: Starting Gear Learning");
+    }
+
+    void disableBikeOff()
+    {
+        // Set CalculateGear_Flag = true;
+        DisableBikeOff_Flag = false;
+        Serial.println("Command Received: Bike Off timer disabled");
+        Serial.println("Code will not go into reset mode");
+    }
 };
 
 #endif
