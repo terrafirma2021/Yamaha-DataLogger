@@ -9,6 +9,9 @@ extern uint8_t Speed_PID;   // RAW km/h
 extern uint8_t Gear_PID;    // RAW 00-05
 extern uint8_t Error_PID;   // Error code
 
+// Debug
+extern int DEBUG_LEVEL;
+
 // Function to convert a PID value to hexadecimal string
 template<typename T>
 std::string hexToString(T value) {
