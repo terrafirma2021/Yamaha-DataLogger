@@ -10,13 +10,25 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <U8g2lib.h>
+#include <iostream>
+#include <string>
 
-// Constants for L9637D pins
-#define YAM_TX 12
-#define YAM_RX 33
+// Define L9637D Pins
+#define YAM_TX 1
+#define YAM_RX 38
+
+// Debug Test Pins for L9637D
+// #define YAM_TX 12
+// #define YAM_RX 33
 
 // Debug Level
-int DEBUG_LEVEL = 1;
+extern bool Debug_RX;
+extern bool Debug_TX;
+extern bool Debug_PIDS;
+bool DisableBikeOff_Flag = false;
+
+//BLE Connected bool
+extern bool clientConnected;
 
 // Time thresholds and timeouts
 const unsigned long FRAME_END_THRESHOLD_TIMER = 3000;   // 5 milliseconds in microseconds
@@ -53,7 +65,8 @@ bool frameEndDetected = false;
 // Function declarations
 void setup();
 void loop();
-void readSerialData();
+void YamahaInbound();
+void serialTerminal();
 void processSerialByte(byte incomingByte);
 void handleIMMOSequence(byte incomingByte);
 void handleDiagStart(byte incomingByte);
@@ -64,9 +77,13 @@ void calculateRPM();
 void calculateVehicleSpeed();
 void extractErrorCode();
 void calculateCoolantTemp();
-void init_nvs();
-void handleCurrentGearPID(bool nvs_data_read);
 void CalculateGear(uint16_t currentSpeed, uint16_t currentRpm);
+void handleCurrentGearPID(bool nvs_data_read);
+void init_nvs();
+void MCU_PIDS();
+void maximumSpeed();
+void sendUart(std::string msg);
+void DebugPIDS();
 
 // Calculate Gear Constants
 const uint16_t Gear_Vector_Size = 333; // 15*333 = 4995 ms (Gear detection time)
@@ -90,12 +107,8 @@ bool CalculateGear_Flag = false;
 byte gear_speed = 0;
 byte gear_rpm = 0;
 
-// PIDS
-uint16_t RPM_PID;    // RPM * 50 = RAW
-uint8_t Coolant_PID; // Temp = RAW
-uint8_t Speed_PID;   // RAW km/h
-uint8_t Gear_PID;    // RAW 00-05
-uint8_t Error_PID;   // Error code
+// Top Speed
+byte MaxSpeed = 0;
 
 // Calculate Gear Buffers
 std::vector<uint16_t> ratio_buffer;
@@ -107,22 +120,36 @@ uint64_t gear5_timer_start = 0;
 uint16_t stored_gear_buffer[] = {6};
 bool nvs_data_read = false;
 
-// Calulate Gear Functions
-void init_nvs();
-void CalculateGear(uint16_t currentSpeed, uint16_t currentRpm);
-void handleCurrentGearPID(bool nvs_data_read);
+// Global variable to store the retrieved gear values
+#define MAX_STORED_GEARS 6 // Maximum number of stored gears in the buffer
+uint16_t NVS_stored_gear_buffer[MAX_STORED_GEARS];
+uint16_t NVS_index_current_gear = 0; // Variable to store the current gear ratio index from NVS
 
-// Disable Bike Timer
-bool DisableBikeOff_Flag = false;
+// PIDS
+uint16_t RPM_PID;       // RPM * 50 = RAW
+uint8_t Coolant_PID;    // Temp = RAW
+uint8_t Speed_PID;      // RAW km/h
+uint8_t Gear_PID;       // RAW 00-05
+uint8_t Error_PID;      // Error code
+uint16_t Temp_PID;      // MCU Temp
+uint16_t CPU_PID;       // CPU Freq mhz
+uint32_t RAM_Free_PID;  // Free Ram
+uint16_t Max_Speed_PID; // Distance since Time on
 
+// Setup
 void setup()
 {
     delay(1000);
     Serial.begin(115200);
     Serial1.begin(16040, SERIAL_8N1, YAM_RX, YAM_TX);
     Serial.println("Yamaha ELM327 Datalogger");
-    MyCallbacks *myCallbacks = new MyCallbacks();
+    Serial.println("MCU Temperature: " + String(temperatureRead()) + " °C");
+    Serial.println("CPU Frequency: " + String(ESP.getCpuFreqMHz()) + " MHz");
+    Serial.println("Free Heap: " + String(ESP.getFreeHeap()) + " bytes");
+    Serial.println("Max Alloc Heap: " + String(ESP.getMaxAllocHeap()) + " bytes"); // Maximum allocatable block of memory
+    init_nvs();
     u8g2.begin();
+    MyCallbacks *myCallbacks = new MyCallbacks();
     bool success = Device::getInstance().start(myCallbacks);
     if (!success)
     {
@@ -133,12 +160,14 @@ void setup()
 void loop()
 {
     handleBikeOffCondition();
-    readSerialData();
+    YamahaInbound();
     displayData();
-    Device::getInstance().sendUart(); // Not returning correctly (TO FIX)
+    serialTerminal();
+    DebugPIDS();
+    MCU_PIDS();
 }
 
-void readSerialData()
+void YamahaInbound()
 {
     if (Serial1.available())
     {
@@ -147,6 +176,50 @@ void readSerialData()
 
         // Update the timestamp of the last received byte
         lastByteTime = esp_timer_get_time();
+    }
+}
+
+void serialTerminal() 
+{
+    // Check if serial data is available
+    if (Serial.available()) 
+    {
+        String input = Serial.readStringUntil('\n');
+        input.toUpperCase();
+
+        if (input.equals("DEBUG OFF") || input.equals("DEBUG 0")) 
+        {
+            (Serial.println("Command Received: Debug Off"));
+            Debug_RX = false;
+            Debug_TX = false;
+            Debug_PIDS = false;
+            DisableBikeOff_Flag = false;
+        } 
+        else if (input.equals("DEBUG RX")) 
+        {
+            (Serial.println("Command Received: Debug RX"));
+            Debug_RX = true;
+        } 
+        else if (input.equals("DEBUG TX")) 
+        {
+            (Serial.println("Command Received: Debug TX"));
+            Debug_TX = true;
+        } 
+        else if (input.equals("DEBUG PIDS")) 
+        {
+            (Serial.println("Command Received: Debug PIDS"));
+            Debug_PIDS = true;
+        } 
+        else if (input.equals("BIKE ON")) 
+        {
+            (Serial.println("command Received: Bike timer disabled"));
+            DisableBikeOff_Flag = true;
+        }
+        else if (input.equals("RESET")) 
+        {
+            (Serial.println("command Received: Bye!"));
+            ESP.restart();
+        }
     }
 }
 
@@ -176,6 +249,8 @@ void handleIMMOSequence(byte incomingByte)
     if (incomingByte == IMMO_START_BYTE && !isIMMOInProgress)
     {
         Serial.println("IMMO Start Detected, Starting IMMO Sequence");
+        std::string msg = "IMMO Start Detected, Starting IMMO Sequence";
+        sendUart(msg);
         isIMMOInProgress = true; // Set flag to indicate IMMO sequence is in progress
         IMMOIndex = 0;           // Reset the buffer index
     }
@@ -201,6 +276,8 @@ void handleIMMOSequence(byte incomingByte)
         {
             DiagIsStarting = true;
             Serial.println("Diagnostic Menu Starting");
+            std::string msg = "Diagnostic Menu Starting";
+            sendUart(msg);
             isIMMOHandled = true;     // Set IMMO handled if diagnostic menu starts
             isIMMOInProgress = false; // Reset IMMO in progress flag
         }
@@ -208,6 +285,8 @@ void handleIMMOSequence(byte incomingByte)
         {
             NormalOperation = true;
             Serial.println("Normal Operation Detected");
+            std::string msg = "Normal Operation Detected";
+            sendUart(msg);
             isIMMOHandled = true;     // Set IMMO handled if normal operation starts
             isIMMOInProgress = false; // Reset IMMO in progress flag
         }
@@ -227,6 +306,8 @@ void handleDiagStart(byte incomingByte)
     {
         // Print message indicating DIAG Menu initialization
         Serial.println("DIAG Menu init");
+        std::string msg = "DIAG Menu init";
+        sendUart(msg);
     }
 }
 
@@ -271,20 +352,6 @@ void processECUData()
     extractErrorCode();
     calculateCoolantTemp();
     handleCurrentGearPID(nvs_data_read);
-
-    if (DEBUG_LEVEL >= 1)
-    {
-        Serial.print("RPM: ");
-        Serial.println(RPM_PID);
-        Serial.print("Vehicle Speed: ");
-        Serial.println(Speed_PID);
-        Serial.print("Current Gear: ");
-        Serial.println(Gear_PID);
-        Serial.print("Coolant Temp: ");
-        Serial.println(Coolant_PID);
-        Serial.print("Error Code: ");
-        Serial.println(Error_PID);
-    }
 }
 
 void handleBikeOffCondition()
@@ -303,18 +370,23 @@ void handleBikeOffCondition()
         auto timeElapsed = currentTime - lastByteTime;
         // Check if it's time to consider the bike off condition
         if (timeElapsed > BIKE_OFF_TIMEOUT_TIMER)
+
         {
             // Reset flags and variables related to bike off condition
-            bool isIMMOHandled = false;
-            bool isIMMOInProgress = false;
-            bool DiagIsStarting = false;
-            bool NormalOperation = false;
-            bool frameEndDetected = false;
+            isIMMOHandled = false;
+            isIMMOInProgress = false;
+            DiagIsStarting = false;
+            NormalOperation = false;
+            frameEndDetected = false;
+
             ECUBufferIndex = 0;
             lastByteTime = 0;
 
             // Print message indicating bike off condition detected
             Serial.println("Bike Off Detected");
+
+            std::string msg = "Bike Off Detected";
+            sendUart(msg);
         }
     }
 }
@@ -334,7 +406,7 @@ void calculateRPM()
     gear_rpm = RPM;
 
     // Set Flag to tell Calculate Gear function new byte has arrived
-    bool gear_rpm_Flag = true;
+    gear_rpm_Flag = true;
 }
 
 void calculateVehicleSpeed()
@@ -354,6 +426,9 @@ void calculateVehicleSpeed()
         // Store the total speed directly in Speed_PID
         Speed_PID = totalSpeed;
 
+        // write the Speed For Maxmium Speed Function
+        MaxSpeed = totalSpeed;
+
         // Write the Speed_PID to the gear_speed buffer
         gear_speed = Speed_PID;
 
@@ -361,7 +436,7 @@ void calculateVehicleSpeed()
         gear_speed = gear_speed;
 
         // set calculateGear_Speed Flag true
-        bool gear_speed_Flag = true;
+        gear_speed_Flag = true;
 
         // Reset the buffer index to 0 for the next frame
         VehicleSpeedRawBufferIndex = 0;
@@ -386,6 +461,7 @@ void calculateCoolantTemp()
 // Function to initialize NVS
 void init_nvs()
 {
+    // Initialize NVS flash
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND)
     {
@@ -393,12 +469,55 @@ void init_nvs()
         err = nvs_flash_init();
     }
     ESP_ERROR_CHECK(err);
+
+    // Open NVS storage named "storage"
+    nvs_handle_t nvs_handle;
+    err = nvs_open("storage", NVS_READONLY, &nvs_handle);
+    if (err != ESP_OK)
+    {
+        printf("Error (%s) opening NVS handle!\n", esp_err_to_name(err));
+        std::string err1 = std::string(esp_err_to_name(err));
+        std::string msg = "Error (%s) committing data to NVS!\n" + err1;
+        sendUart(msg);
+        return;
+    }
+
+    // Read each stored gear value from NVS and append it to the buffer
+    for (int i = 0; i < MAX_STORED_GEARS; i++)
+    {
+        uint16_t gear_value;
+        err = nvs_get_u16(nvs_handle, (const char *)&i, &gear_value);
+        if (err == ESP_OK)
+        {
+            NVS_stored_gear_buffer[i] = gear_value;
+            printf("Read gear value %d from NVS and appended to the buffer at index %d\n", gear_value, i);
+            std::string Geara = std::string(gear_value, i);
+            std::string msg = "Read gear value %d from NVS and appended to the buffer at index %d\n" + Geara;
+            NVS_index_current_gear++; // Update the NVS index current gear
+        }
+        else if (err == ESP_ERR_NVS_NOT_FOUND)
+        {
+            printf("No gear value found at index %d in NVS\n", i);
+            std::string msg = "No gear value found at index %d in NVS"; // err add index
+            sendUart(msg);
+        }
+        else
+        {
+            printf("Error (%s) reading gear value from NVS at index %d\n", esp_err_to_name(err), i);
+            std::string err1 = std::string(esp_err_to_name(err));
+            std::string msg = "Error (%s) reading gear value from NVS at index %d\n" + err1;
+            sendUart(msg);
+        }
+    }
+
+    // Close NVS
+    nvs_close(nvs_handle);
 }
 
 // Function to calculate gear
 void CalculateGear(uint16_t currentSpeed, uint16_t currentRpm)
 {
-    // Check if both gear_speed and gear_rpm are set before processing
+    // BLE Serial request to start gear ratio tuning, check if both gear_speed and gear_rpm are set before processing
     if (gear_speed_Flag && gear_rpm_Flag && CalculateGear_Flag && !GearsAreCalc)
     {
 
@@ -440,6 +559,15 @@ void CalculateGear(uint16_t currentSpeed, uint16_t currentRpm)
             current_gear_buffer[current_gear].push_back(gearRatio);
             last_ratio[current_gear] = gearRatio;
 
+            // Serial print to indicate the index and value written
+            Serial.print("Stored gear ratio ");
+            Serial.print(gearRatio);
+            Serial.print(" in current_gear_buffer at index ");
+            Serial.println(current_gear_buffer[current_gear].size() - 1);
+            // std::string Geara = std::string(current_gear_buffer[current_gear].size() - 1);
+            // std::string msg = "Stored gear ratio\n" + Geara;
+            // Device::getInstance().sendUart(msg);
+
             // Check for gear change based on ratio difference
             if (std::abs(gear_Current_Ratio - last_ratio[current_gear]) > Ratio_Threshold)
             {
@@ -468,9 +596,13 @@ void CalculateGear(uint16_t currentSpeed, uint16_t currentRpm)
                     {
                         nvs_handle_t nvs_handle;
                         esp_err_t err = nvs_open("storage", NVS_READWRITE, &nvs_handle);
+                        std::string err1 = std::string(esp_err_t());
                         if (err != ESP_OK)
                         {
                             printf("Error (%s) opening NVS handle!\n", esp_err_to_name(err));
+                            std::string err1 = std::string(esp_err_to_name(err));
+                            std::string msg = "Error (%s) opening NVS handle!\n" + err1;
+                            sendUart(msg);
                             return;
                         }
 
@@ -479,6 +611,9 @@ void CalculateGear(uint16_t currentSpeed, uint16_t currentRpm)
                         if (err != ESP_OK)
                         {
                             printf("Error (%s) writing data to NVS!\n", esp_err_to_name(err));
+                            std::string err1 = std::string(esp_err_to_name(err));
+                            std::string msg = "Error (%s) writing data to NVS!\n" + err1;
+                            sendUart(msg);
                             nvs_close(nvs_handle);
                             return;
                         }
@@ -488,6 +623,9 @@ void CalculateGear(uint16_t currentSpeed, uint16_t currentRpm)
                         if (err != ESP_OK)
                         {
                             printf("Error (%s) committing data to NVS!\n", esp_err_to_name(err));
+                            std::string err1 = std::string(esp_err_to_name(err));
+                            std::string msg = "Error (%s) committing data to NVS!\n" + err1;
+                            sendUart(msg);
                         }
 
                         // Close NVS
@@ -505,7 +643,7 @@ void CalculateGear(uint16_t currentSpeed, uint16_t currentRpm)
     }
 }
 
-// Function to handle current gear PID
+// Function to handle current gear PID using the contents of the NVS_stored_gear_buffer
 void handleCurrentGearPID(bool nvs_data_read)
 {
     if (nvs_data_read)
@@ -513,14 +651,66 @@ void handleCurrentGearPID(bool nvs_data_read)
         // Compare gear_Current_Ratio with stored gear ratio
         for (size_t i = 0; i < 6; ++i)
         { // Using the known size of the array (6)
-            if (gear_Current_Ratio == stored_gear_buffer[i])
+            if (gear_Current_Ratio == NVS_stored_gear_buffer[i])
             {
                 // Set GEAR_PID to the index number of the matched value inside the stored_gear_buffer
-                Gear_PID = i;
-                return; // Exit the loop once a match is found
+                Gear_PID = i + 1; // Bump the index value by + 1
+                return;           // Exit the loop once a match is found
             }
         }
-        // If no match is found, set GEAR_PID to 0 // Need to implement smoothing ideally to return less false neutral (TO DO!) 
+        // If no match is found, set GEAR_PID to 0 // Need to implement smoothing ideally to return less false neutral (TO DO!)
         Gear_PID = 0;
+    }
+}
+
+void maximumSpeed()
+{
+    byte topSpeed = 0;
+
+    if (MaxSpeed > topSpeed)
+    {
+        topSpeed = MaxSpeed;
+    }
+
+    Max_Speed_PID = topSpeed;
+}
+
+void MCU_PIDS()
+{
+    float temperature = temperatureRead();
+    Temp_PID = (temperature * 1000);
+    CPU_PID = (ESP.getCpuFreqMHz());
+    RAM_Free_PID = (ESP.getFreeHeap());
+}
+
+
+void sendUart(std::string msg)
+    {
+        Device::getInstance().sendUART(msg);
+    }
+
+
+void DebugPIDS()
+{
+        if (Debug_PIDS)
+    {
+        Serial.print("RPM: ");
+        Serial.println(RPM_PID);
+        Serial.print("Vehicle Speed: ");
+        Serial.println(Speed_PID);
+        Serial.print("Current Gear: ");
+        Serial.println(Gear_PID);
+        Serial.print("Coolant Temp: ");
+        Serial.println(Coolant_PID);
+        Serial.print("Error Code: ");
+        Serial.println(Error_PID);
+        Serial.print("MCU Temp: ");
+        Serial.println(Temp_PID);
+        Serial.print("CPU Mhz: ");
+        Serial.println(CPU_PID);
+        Serial.print("Ram Free: ");
+        Serial.println(RAM_Free_PID);
+        Serial.print("Max Speed: ");
+        Serial.println(Max_Speed_PID);
     }
 }
