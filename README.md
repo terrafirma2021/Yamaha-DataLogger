@@ -20,13 +20,17 @@ ESP32 s3 BLE Yamaha Datalogger
 0.96" I2C
 
 
+
 #### Supported PIDs:
 - RPM
 - Speed
 - Error code
 - Coolant Temp
 - Gear
-- Voltage ( todo)
+- MCU Temp
+- CPU Freq
+- Ram Free
+- Top Speed
 
 #### Requirements:
 To build this project, you will need the following components:
@@ -37,5 +41,13 @@ To build this project, you will need the following components:
 #### Additional Information:
 - It's possible to pozi-tap the loom for other sensor data not sent via the k-line.
 - Wokwi circuit design: https://wokwi.com/projects/391712730296045569
+
+#### Big thanks to:
+- [TriB](https://github.com/HerrRiebmann) For the L9637D's and LOTS of wise advice from an ECU VET :) 
+- The Dude Discord: @skydiving123 For Schooling me alot :P  \o/
+- [Unexpected Maker:](https://esp32s3.com) for the Feather S3 and support
+- [RealDash](https://realdash.net/index.php)
+- [Race Chrono](https://racechrono.com)
+
 
 ![Screenshot](https://raw.githubusercontent.com/terrafirma2021/Yamaha-DataLogger/main/Screenshot_20240306_113752_Torque.jpg)
