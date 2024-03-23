@@ -1,13 +1,13 @@
-#ifndef BLE_H
-#define BLE_H
-
 #include <Arduino.h>
 #include <BLE2902.h>
 #include <BLECharacteristic.h>
 #include <BLEDevice.h>
+#include <string>
 
 // debug
-extern int DEBUG_LEVEL;
+bool Debug_RX = false;
+bool Debug_TX = false;
+bool Debug_PIDS = false;
 
 // forward declaration for CalculateGear_Flag;
 extern bool CalculateGear_Flag;
@@ -30,11 +30,38 @@ const char UART_TX[] = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
 
 class MyCallbacks;
 
-// Device class for handling BLE operations
-class Device final : public BLEServerCallbacks
+/// Device class for handling BLE operations
+class Device : public BLEServerCallbacks
 {
 public:
+    BLEServer *server;
+    BLEService *serviceELM;
+    BLEService *serviceUAR;
+    BLECharacteristic *ELMTX;
+    BLECharacteristic *ELMRX;
+    BLECharacteristic *UartRX;
+    BLECharacteristic *UartTX;
+    bool clientConnected;
+    bool handleATHCommand = false;
+    bool handleATSCommand = false;
+    bool ath1Active = false;
+
     ~Device() override = default;
+
+    void onConnect(BLEServer *) override
+    {
+        clientConnected = true;
+        Serial.println("Device connected");
+        handleATSCommand = false;
+        handleATHCommand = false;
+    }
+
+    void onDisconnect(BLEServer *) override
+    {
+        clientConnected = false;
+        Serial.println("Device disconnected");
+        BLEDevice::startAdvertising();
+    }
 
     // Singleton pattern to get instance of Device
     static Device &getInstance()
@@ -55,190 +82,119 @@ public:
         return server->getConnectedCount() > 0;
     }
 
-    // Getters for BLE characteristics
-    BLECharacteristic *getUartTxCharacteristic() const
-    {
-        return uartTxCharacteristic;
-    }
-
-    BLECharacteristic *getElm327TxCharacteristic() const
-    {
-        return elm327TxCharacteristic;
-    }
-
-    BLECharacteristic *getUartRxCharacteristic() const
-    {
-        return uartRxCharacteristic;
-    }
-
     // BLE Device Initialization and Service Setup
     bool start(BLECharacteristicCallbacks *callbacks)
     {
         // Initialize BLE device
         BLEDevice::init("Carista");
         BLEDevice::setPower(ESP_PWR_LVL_P9);
+        BLEDevice::setMTU(517);
 
         // Create BLE server and set callbacks
         server = BLEDevice::createServer();
         server->setCallbacks(this);
 
-        // Create the ELM327 service and characteristics
-        service = server->createService(BLEUUID(ELM327_SERVICE_UUID));
-        elm327RxCharacteristic = createCharacteristic(ELM327_RX, BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_INDICATE);
-        elm327TxCharacteristic = createCharacteristic(ELM327_TX, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
-        elm327TxCharacteristic->setCallbacks(callbacks);
+        // Create the ELM327 service and characteristics ( Swapped RX/TX naming for easy read)
+        serviceELM = server->createService(BLEUUID(ELM327_SERVICE_UUID));
+        ELMTX = createCharacteristic(ELM327_RX, BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_INDICATE);
 
-        // UART Service and Characteristics
+        ELMRX = createCharacteristic(ELM327_TX, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+        ELMRX->setCallbacks(callbacks);
+
+        // Create the UART service and characteristics (Swapped RX/TX naming for easy read)
         BLEUUID uartServiceUUID = BLEUUID(UART_SERVICE_UUID);
-        BLEService *uartService = server->createService(uartServiceUUID);
+        serviceUAR = server->createService(uartServiceUUID);
 
-        if (uartService)
-        {
-            // UART RX Characteristic
-            uartRxCharacteristic = uartService->createCharacteristic(
-                BLEUUID(UART_RX),
-                BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_INDICATE);
-            if (uartRxCharacteristic)
-            {
-                uartRxCharacteristic->addDescriptor(new BLE2902());
-            }
+        UartRX = serviceUAR->createCharacteristic(
+            BLEUUID(UART_TX),
+            BLECharacteristic::PROPERTY_WRITE);
 
-            // UART TX Characteristic
-            uartTxCharacteristic = uartService->createCharacteristic(
-                BLEUUID(UART_TX),
-                BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
-            if (uartTxCharacteristic)
-            {
-                uartTxCharacteristic->addDescriptor(new BLE2902());
-                uartTxCharacteristic->setCallbacks(callbacks);
-            }
-        }
+        UartRX->setCallbacks(callbacks);
 
-        // Start BLE services
-        service->start();
-        uartService->start();
-        setupAdvertising();
+        UartTX = serviceUAR->createCharacteristic(
+            BLEUUID(UART_RX),
+            BLECharacteristic::PROPERTY_NOTIFY);
+        UartTX->addDescriptor(new BLE2902());
+
+        serviceELM->start();
+        serviceUAR->start();
+
+        BLEAdvertising *advertising = BLEDevice::getAdvertising();
+        advertising->addServiceUUID(serviceELM->getUUID());
+        advertising->addServiceUUID(serviceUAR->getUUID());
+        advertising->start();
 
         return true;
     }
 
-    // BLE Server Callback Methods
-
-    void sendElm(const char *data)
+    void sendElm(std::string data)
     {
-        if (clientConnected)
+        if (!clientConnected)
+            return;
+
+        ELMTX->setValue(data);
+        ELMTX->notify();
+        if (Debug_TX)
         {
-            elm327RxCharacteristic->setValue((uint8_t *)data, strlen(data));
-            elm327RxCharacteristic->notify();
-#if DEBUG_LEVEL >= 1
             Serial.print("Sent to Elm: ");
-            Serial.println(data);
-#endif
+            Serial.println(data.c_str());
         }
     }
 
-    void sendUart()
+    void sendUART(std::string text)
     {
-        if (Serial.available() > 0)
-        {
-            String serialData = Serial.readStringUntil('\n');
-            serialData += '\n';
-            uartRxCharacteristic->setValue(serialData.c_str());
-            uartRxCharacteristic->notify();
 
-            Serial.print("Sent over BLE: ");
-            Serial.println(serialData);
-#if DEBUG_LEVEL >= 1
-            Serial.print("Sent over BLE: ");
-            Serial.println(serialData);
-#endif
-        }
+        if (!clientConnected)
+            return;
+
+        text += '\n';
+        UartTX->setValue(text);
+        UartTX->notify();
     }
-
-    void onConnect(BLEServer *) override
-    {
-        clientConnected = true;
-#if DEBUG_LEVEL >= 1
-        Serial.println("Device connected");
-#endif
-        handleATSCommand = false;
-        handleATHCommand = false;
-#if DEBUG_LEVEL >= 1
-        Serial.println("AT Commands Reset");
-#endif
-    }
-
-    void onDisconnect(BLEServer *) override
-    {
-        clientConnected = false;
-#if DEBUG_LEVEL >= 1
-        Serial.println("Device disconnected");
-#endif
-        BLEDevice::startAdvertising();
-    }
-
-    bool handleATHCommand = false;
-    bool handleATSCommand = false;
-    bool ath1Active = false;
 
     // Modify the response based on device settings
     std::string sendResponse(const std::string &command, const std::string &response)
     {
         Device &device = Device::getInstance();
-        std::string finalResponse = response;
+        std::string amendedResponse = response;
 
         if (device.ath1Active && command.rfind("01", 0) == 0)
         {
-            finalResponse = "7E8 06 " + finalResponse;
-#if DEBUG_LEVEL == 2
-            Serial.println("ATH1 Active: Headers appended");
-#endif
+            amendedResponse = "7E8 06 " + amendedResponse;
+            if (Debug_RX)
+            {
+                Serial.println("ATH1 Active: Headers appended");
+                std::string msg =
+                    "ATH1 Active: Headers appended " + amendedResponse;
+            }
         }
 
         if (device.handleATSCommand)
         {
-            finalResponse.erase(std::remove(finalResponse.begin(), finalResponse.end(), ' '), finalResponse.end());
-#if DEBUG_LEVEL == 2
-            Serial.println("ATS1 Active: Spaces removed");
-#endif
+            amendedResponse.erase(std::remove(amendedResponse.begin(), amendedResponse.end(), ' '), amendedResponse.end());
+            if (Debug_RX)
+            {
+                Serial.println(("ATS1 Active: Spaces removed " + amendedResponse).c_str());
+                std::string msg =
+                    "ATS1 Active: Spaces removed " + amendedResponse;
+            }
         }
-
-#if DEBUG_LEVEL == 2
-        Serial.println(("Final Response: " + finalResponse).c_str());
-#endif
-        return finalResponse;
+        return amendedResponse;
     }
 
 private:
     Device()
-        : server(), service(), elm327RxCharacteristic(),
-          elm327TxCharacteristic(), uartRxCharacteristic(),
-          uartTxCharacteristic(), clientConnected(false) {}
+        : server(), serviceELM(), serviceUAR(), ELMTX(),
+          ELMRX(), UartRX(),
+          UartTX(), clientConnected(false) {}
 
     // Helper function to create BLE characteristic
     BLECharacteristic *createCharacteristic(uint16_t uuid, uint32_t properties)
     {
-        BLECharacteristic *characteristic = service->createCharacteristic(BLEUUID(uuid), properties);
+        BLECharacteristic *characteristic = serviceELM->createCharacteristic(BLEUUID(uuid), properties);
         characteristic->addDescriptor(new BLE2902());
         return characteristic;
     }
-
-    // Setup advertising for BLE device
-    void setupAdvertising()
-    {
-        BLEAdvertising *advertising = BLEDevice::getAdvertising();
-        advertising->addServiceUUID(service->getUUID());
-        advertising->setScanResponse(false);
-        BLEDevice::startAdvertising();
-    }
-
-    BLEServer *server;
-    BLEService *service;
-    BLECharacteristic *elm327RxCharacteristic;
-    BLECharacteristic *elm327TxCharacteristic;
-    BLECharacteristic *uartRxCharacteristic;
-    BLECharacteristic *uartTxCharacteristic;
-    bool clientConnected;
 };
 
 class MyCallbacks : public BLECharacteristicCallbacks
@@ -246,154 +202,197 @@ class MyCallbacks : public BLECharacteristicCallbacks
 public:
     void onWrite(BLECharacteristic *characteristic) override
     {
-        if (characteristic == Device::getInstance().getUartTxCharacteristic())
+        if (characteristic == Device::getInstance().UartRX)
         {
-            // Handle UART TX characteristic data
-            uint8_t *value = characteristic->getData();
+            // Get the data from the characteristic as uint8_t array
+            uint8_t *data = characteristic->getData();
             size_t len = characteristic->getLength();
 
-            // Assuming the command is a string
+            // If there is data
             if (len > 0)
             {
-                // Convert the data into a string
-                String command = "";
-                for (size_t i = 0; i < len; ++i)
-                {
-                    // Exclude carriage return and line feed characters
-                    if (value[i] != '\r' && value[i] != '\n')
-                    {
-                        command += static_cast<char>(value[i]);
-                    }
-                }
-
-                // Call private function to dispatch the command
-                incomingCommands(command);
+                UA_RX(data, len); // Send Uart RX
             }
         }
-        else if (characteristic == Device::getInstance().getElm327TxCharacteristic())
+        else if (characteristic == Device::getInstance().ELMRX)
+
         {
-            // Handling ELM327 TX characteristic data
-            uint8_t *value = characteristic->getData();
+            // Get the data from the characteristic as uint8_t array
+            uint8_t *data = characteristic->getData();
             size_t len = characteristic->getLength();
 
-            // Processing the received data (stripping leading/trailing whitespace, converting to uppercase, etc.)
-            size_t start = 0;
-            while (start < len && (value[start] == ' ' || value[start] == '\t' || value[start] == '\n' || value[start] == '\r'))
+            // If there is data
+            if (len > 0)
             {
-                start++;
+                ELM_RX(data, len); // fix BLE Stack canary watchpoint triggered (BTC_TASK)
             }
-
-            while (len > start && (value[len - 1] == ' ' || value[len - 1] == '\t' || value[len - 1] == '\n' || value[len - 1] == '\r'))
-            {
-                len--;
-            }
-
-            for (size_t i = start; i < len; i++)
-            {
-                value[i] = toupper(value[i]);
-            }
-
-#if DEBUG_LEVEL >= 1
-            Serial.print("Received: ");
-            Serial.write(value + start, len - start);
-            Serial.println();
-            Serial.print("Received data length: ");
-            Serial.println(len - start);
-#endif
-
-            std::string command((char *)(value + start), len - start);
-            std::string response = handleCommand(command);
-            std::string finalResponse = Device::getInstance().sendResponse(command, response + "\r>");
-            Device::getInstance().sendElm(finalResponse.c_str());
-
-#if DEBUG_LEVEL >= 2
-            Serial.print("onWrite: Sent final response: ");
-            Serial.println(finalResponse.c_str());
-#endif
         }
+    }
+
+    void UA_RX(uint8_t *data, size_t len)
+    {
+        // replace this lame String with proper std::string
+        std::string command;
+
+        for (size_t i = 0; i < len; i++)
+        {
+            if (data[i] != '\n')
+            {
+                command += (char)data[i];
+                continue;
+            }
+
+            trimInPlace(command);
+            toUpperCaseInPlace(command);
+
+            // Process the command based on the received string
+            if (command == "DEBUG OFF" || command == "DEBUG 0")
+            {
+                Debug_RX = false;
+                Debug_TX = false;
+                Debug_PIDS = false;
+                Serial.println("Command Received: Debug Off");
+                msg("Command Received: Debug Off");
+            }
+            else if (command == "DEBUG RX")
+            {
+                Debug_RX = true;
+                Debug_TX = false;
+                Debug_PIDS = false;
+                Serial.println("Command Received: Debug RX Enabled");
+                msg("Command Received: Debug ELM RX Enabled");
+            }
+            else if (command == "DEBUG 2")
+            {
+                Debug_RX = false;
+                Debug_TX = false;
+                Debug_PIDS = false;
+                Serial.println("Command Received: Debug 2 Enabled");
+                msg("Command Received: Debug 2 Enabled");
+            }
+            else if (command == "DEBUG TX")
+            {
+                Debug_RX = false;
+                Debug_TX = true;
+                Debug_PIDS = false;
+                Serial.println("Command Received: Debug TX Enabled");
+                msg("Command Received: Debug TX Enabled");
+            }
+            else if (command == "DEBUG PID")
+            {
+                // Set CalculateGear_Flag = true;
+                Debug_RX = false;
+                Debug_TX = false;
+                Debug_PIDS = true;
+                Serial.println("Command Received: Enabled PID Debug");
+                msg("Command Received: Enabled PID Debug");
+            }
+            else if (command == "RESET")
+            {
+                Serial.println("Command Received: Reset ESP");
+                msg("Command Received: Reset ESP");
+                ESP.restart();
+            }
+            else if (command == "GEAR LEARN")
+            {
+                CalculateGear_Flag = true;
+                Serial.println("Command Received: Starting Gear Learning");
+                Serial.println("Read the tutorial on how to use this feature");
+                msg("Command Received: Starting Gear Learning");
+            }
+            else if (command == "BIKE OFF")
+            {
+                // Set CalculateGear_Flag = true;
+                DisableBikeOff_Flag = true;
+                Serial.println("Command Received: Disabled Bike timer");
+                msg("Command Received: Disabled Bike timer");
+            }
+            else if (command == "BIKE ON")
+            {
+                // Set CalculateGear_Flag = true;
+                DisableBikeOff_Flag = false;
+                Serial.println("Command Received: Enabled Bike timer");
+                msg("Command Received: Enabled Bike timer");
+            }
+            else
+            {
+                Serial.print("No command found: ");
+                Serial.println(command.c_str());
+                msg("No command found: " + command);
+            }
+            // Clear the command string for the next command
+            command = "";
+        }
+    }
+
+    // void ELM_RX(BLECharacteristic *characteristic)
+    void ELM_RX(uint8_t *data, size_t len)
+    {
+        // Find the first non-whitespace character
+        size_t start = 0;
+        while (start < len && isspace(data[start]))
+        {
+            start++;
+        }
+
+        // Find the last non-whitespace character
+        while (len > start && isspace(data[len - 1]))
+        {
+            len--;
+        }
+
+        // Convert to uppercase in place
+        for (size_t i = start; i < len; i++)
+        {
+            data[i] = toupper(data[i]);
+        }
+
+        if (Debug_RX)
+        {
+            Serial.print("Received: ");
+            Serial.write(data + start, len - start);
+            Serial.println();
+        }
+
+        std::string res;
+        {
+            std::string command((char *)(data + start), len - start);
+            std::string response = handleCommand(command);
+            res = Device::getInstance().sendResponse(command, response + "\r>");
+        }
+
+        Device::getInstance().sendElm(res);
     }
 
 private:
-    // Private function to dispatch commands
-    void incomingCommands(String command)
+    void toUpperCaseInPlace(std::string &str)
     {
-        // Convert the command to uppercase for case-insensitive comparison
-        command.toUpperCase();
-
-        // Call corresponding functions based on the received command
-        if (command == "DEBUG OFF")
+        for (auto &c : str)
         {
-            handleDebugOff();
-        }
-        else if (command == "DEBUG 1")
-        {
-            handleDebug1();
-        }
-        else if (command == "DEBUG 2")
-        {
-            handleDebug2();
-        }
-        else if (command == "RESET")
-        {
-            handleReset();
-        }
-        else if (command == "GEAR LEARN")
-        {
-            handleGearLearn();
-        }
-        else
-        {
-            // Do Nothing ;
+            c = std::toupper(static_cast<unsigned char>(c)); // Convert each character to uppercase
         }
     }
 
-    // Define functions to handle different commands
-    void handleDebugOff()
+    // Device::getInstance().sendUART("Message");
+    void trimInPlace(std::string &str)
     {
-        DEBUG_LEVEL = 0;
-        Serial.println("Command Received: Debug Off");
+        // Lambda function to check if a character is not a whitespace
+        auto notSpace = [](int ch)
+        { return !std::isspace(static_cast<unsigned char>(ch)); };
+
+        // Find the first non-whitespace character
+        auto start = std::find_if(str.begin(), str.end(), notSpace);
+        // Erase leading whitespace
+        str.erase(str.begin(), start);
+
+        // Find the last non-whitespace character
+        auto end = std::find_if(str.rbegin(), str.rend(), notSpace).base();
+        // Erase trailing whitespace
+        str.erase(end, str.end());
     }
 
-    void handleDebug1()
+    void msg(std::string msg)
     {
-        DEBUG_LEVEL = 1;
-        Serial.println("Command Received: Debug 1 Enabled");
-    }
-
-    void handleDebug2()
-    {
-        DEBUG_LEVEL = 2;
-        Serial.println("Command Received: Debug 2 Enabled");
-    }
-
-    void handleReset()
-    {
-        Serial.println("Command Received: Reset ESP");
-        ESP.restart();
-    }
-
-    void handleGearLearn()
-    {
-        // Set CalculateGear_Flag = true;
-        CalculateGear_Flag = true;
-        Serial.println("Command Received: Starting Gear Learning");
-        Serial.println("Read the tutorial on how to use this feature");
-    }
-
-    void enableBikeOff()
-    {
-        // Set CalculateGear_Flag = true;
-        DisableBikeOff_Flag = true;
-        Serial.println("Command Received: Starting Gear Learning");
-    }
-
-    void disableBikeOff()
-    {
-        // Set CalculateGear_Flag = true;
-        DisableBikeOff_Flag = false;
-        Serial.println("Command Received: Bike Off timer disabled");
-        Serial.println("Code will not go into reset mode");
+        Device::getInstance().sendUART(msg);
     }
 };
-
-#endif
