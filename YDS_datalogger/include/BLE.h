@@ -262,14 +262,6 @@ public:
                 Serial.println("Command Received: Debug RX Enabled");
                 msg("Command Received: Debug ELM RX Enabled");
             }
-            else if (command == "DEBUG 2")
-            {
-                Debug_RX = false;
-                Debug_TX = false;
-                Debug_PIDS = false;
-                Serial.println("Command Received: Debug 2 Enabled");
-                msg("Command Received: Debug 2 Enabled");
-            }
             else if (command == "DEBUG TX")
             {
                 Debug_RX = false;
@@ -280,7 +272,6 @@ public:
             }
             else if (command == "DEBUG PID")
             {
-                // Set CalculateGear_Flag = true;
                 Debug_RX = false;
                 Debug_TX = false;
                 Debug_PIDS = true;
@@ -302,14 +293,12 @@ public:
             }
             else if (command == "BIKE OFF")
             {
-                // Set CalculateGear_Flag = true;
                 DisableBikeOff_Flag = true;
                 Serial.println("Command Received: Disabled Bike timer");
                 msg("Command Received: Disabled Bike timer");
             }
             else if (command == "BIKE ON")
             {
-                // Set CalculateGear_Flag = true;
                 DisableBikeOff_Flag = false;
                 Serial.println("Command Received: Enabled Bike timer");
                 msg("Command Received: Enabled Bike timer");
