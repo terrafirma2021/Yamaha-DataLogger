@@ -30,6 +30,10 @@ bool DisableBikeOff_Flag = false;
 //BLE Connected bool
 extern bool clientConnected;
 
+
+//Watchdog timer Fix
+bool isTempReady = false;
+
 // Time thresholds and timeouts
 const unsigned long FRAME_END_THRESHOLD_TIMER = 3000;   // 5 milliseconds in microseconds
 const unsigned long DIAG_START_TIMEOUT_TIMER = 2000000; // 2 seconds in microseconds
@@ -79,7 +83,7 @@ void extractErrorCode();
 void calculateCoolantTemp();
 void CalculateGear(uint16_t currentSpeed, uint16_t currentRpm);
 void handleCurrentGearPID(bool nvs_data_read);
-void init_nvs();
+void nvs_myinit();
 void MCU_PIDS();
 void maximumSpeed();
 void sendUart(std::string msg);
@@ -121,20 +125,20 @@ uint16_t stored_gear_buffer[] = {6};
 bool nvs_data_read = false;
 
 // Global variable to store the retrieved gear values
-#define MAX_STORED_GEARS 6 // Maximum number of stored gears in the buffer
+const int MAX_STORED_GEARS = 6; // Maximum number of stored gears in the buffer
 uint16_t NVS_stored_gear_buffer[MAX_STORED_GEARS];
 uint16_t NVS_index_current_gear = 0; // Variable to store the current gear ratio index from NVS
 
 // PIDS
 uint16_t RPM_PID;       // RPM * 50 = RAW
-uint8_t Coolant_PID;    // Temp = RAW
 uint8_t Speed_PID;      // RAW km/h
-uint8_t Gear_PID;       // RAW 00-05
+uint8_t Coolant_PID;    // Temp = RAW
 uint8_t Error_PID;      // Error code
-uint16_t Temp_PID;      // MCU Temp
-uint16_t CPU_PID;       // CPU Freq mhz
-uint32_t RAM_Free_PID;  // Free Ram
-uint16_t Max_Speed_PID; // Distance since Time on
+uint8_t Gear_PID;       // RAW 00-05
+uint8_t Temp_PID;      // MCU Temp
+uint8_t CPU_PID;        // CPU Freq mhz
+uint8_t RAM_Free_PID;  // Free Ram
+uint8_t Max_Speed_PID;  // Max Speed Reached
 
 // Setup
 void setup()
@@ -147,7 +151,7 @@ void setup()
     Serial.println("CPU Frequency: " + String(ESP.getCpuFreqMHz()) + " MHz");
     Serial.println("Free Heap: " + String(ESP.getFreeHeap()) + " bytes");
     Serial.println("Max Alloc Heap: " + String(ESP.getMaxAllocHeap()) + " bytes"); // Maximum allocatable block of memory
-    init_nvs();
+    nvs_myinit();
     u8g2.begin();
     MyCallbacks *myCallbacks = new MyCallbacks();
     bool success = Device::getInstance().start(myCallbacks);
@@ -199,15 +203,22 @@ void serialTerminal()
         {
             (Serial.println("Command Received: Debug RX"));
             Debug_RX = true;
+            Debug_TX = false;
+            Debug_PIDS = false;
         } 
         else if (input.equals("DEBUG TX")) 
         {
             (Serial.println("Command Received: Debug TX"));
+            Debug_RX = false;
             Debug_TX = true;
+            Debug_PIDS = false;
+            
         } 
         else if (input.equals("DEBUG PIDS")) 
         {
             (Serial.println("Command Received: Debug PIDS"));
+            Debug_RX = false;
+            Debug_TX = false;
             Debug_PIDS = true;
         } 
         else if (input.equals("BIKE ON")) 
@@ -458,9 +469,51 @@ void calculateCoolantTemp()
     Coolant_PID = coolantTemp;
 }
 
+void nvs_defaults(const char *mynamespace) {
+    nvs_handle my_handle;
+    esp_err_t err;
+
+    // Try to open the namespace in NVS_READWRITE mode.
+    err = nvs_open(mynamespace, NVS_READWRITE, &my_handle);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        // If the namespace was not found, it needs to be created.
+        // Note: nvs_open does not explicitly create a namespace if it doesn't exist.
+        // The namespace is created implicitly when a key-value pair is set.
+        ESP_LOGI("NVS", "Namespace not found, creating it with default values.");
+    } else if (err != ESP_OK) {
+        ESP_LOGE("NVS", "Error (%s) opening NVS handle!", esp_err_to_name(err));
+        return;
+    }
+
+    // At this point, the namespace is open and we can set default values.
+
+    // Set default integer value
+    err = nvs_set_i32(my_handle, "default_int", 123);
+    if (err != ESP_OK) {
+        ESP_LOGE("NVS", "Failed to set default_int!");
+    }
+
+    // Set default string value
+    err = nvs_set_str(my_handle, "default_str", "Hello NVS");
+    if (err != ESP_OK) {
+        ESP_LOGE("NVS", "Failed to set default_str!");
+    }
+
+    // After setting your defaults, commit them to make sure they are saved.
+    err = nvs_commit(my_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE("NVS", "Failed to commit defaults!");
+    }
+
+    // Always close the NVS handle when done to free resources.
+    // nvs_close(my_handle);
+}
+
 // Function to initialize NVS
-void init_nvs()
+void nvs_myinit()
 {
+    const char *mynamespace = "storage";
+
     // Initialize NVS flash
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND)
@@ -472,8 +525,12 @@ void init_nvs()
 
     // Open NVS storage named "storage"
     nvs_handle_t nvs_handle;
-    err = nvs_open("storage", NVS_READONLY, &nvs_handle);
-    if (err != ESP_OK)
+    err = nvs_open(mynamespace, NVS_READONLY, &nvs_handle);
+
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        nvs_defaults(mynamespace);
+    }
+    else if (err != ESP_OK)
     {
         printf("Error (%s) opening NVS handle!\n", esp_err_to_name(err));
         std::string err1 = std::string(esp_err_to_name(err));
@@ -485,8 +542,11 @@ void init_nvs()
     // Read each stored gear value from NVS and append it to the buffer
     for (int i = 0; i < MAX_STORED_GEARS; i++)
     {
+        const char *const key = std::to_string(i).c_str();
+
         uint16_t gear_value;
-        err = nvs_get_u16(nvs_handle, (const char *)&i, &gear_value);
+        err = nvs_get_u16(nvs_handle, key, &gear_value);
+
         if (err == ESP_OK)
         {
             NVS_stored_gear_buffer[i] = gear_value;
@@ -494,6 +554,7 @@ void init_nvs()
             std::string Geara = std::string(gear_value, i);
             std::string msg = "Read gear value %d from NVS and appended to the buffer at index %d\n" + Geara;
             NVS_index_current_gear++; // Update the NVS index current gear
+            sendUart(msg);
         }
         else if (err == ESP_ERR_NVS_NOT_FOUND)
         {
@@ -677,12 +738,21 @@ void maximumSpeed()
 
 void MCU_PIDS()
 {
-    float temperature = temperatureRead();
-    Temp_PID = (temperature * 1000);
-    CPU_PID = (ESP.getCpuFreqMHz());
-    RAM_Free_PID = (ESP.getFreeHeap());
+    static unsigned long previousTime = 0;
+    const long MCUTimer = 1000; // 1 Milisecond to cure Watchdog timer bug (Could be set to less frequent updates if needed)
+    float temperature;
+    unsigned long currentTime = esp_timer_get_time();
+    
+    // Check if it's time to update all PID values
+    if (currentTime - previousTime >= MCUTimer) {
+        previousTime = currentTime;
+        
+        temperature = temperatureRead();       
+        Temp_PID = temperature;
+        CPU_PID = ESP.getCpuFreqMHz();
+        RAM_Free_PID = ESP.getFreeHeap() / 1024;
+    }
 }
-
 
 void sendUart(std::string msg)
     {
