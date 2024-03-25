@@ -1,6 +1,0 @@
-"Name", "ShortName", "ModeAndPID", "Equation", "Min Value", "Max Value", "Units", "Header", "startDiagnostic", "stopDiagnostic", "scale","minimumRefreshDelayMillis"
-"Coolant","Coolant","0x0105","(a)",0,255,"C","","","",1,0
-"Error Code Yamaha","Error","0x0102","(A)",0,255,"","","","",1,0
-"Gear Yamaha","Gear","0x01a4","A",0,6,"","","","",1,0
-"RPM Yamaha","RPM","0x010c","int16(a:b)",0,18000,"rpm","","","",1,0
-"Speed Yamaha","Speed","0x010d","A",0,200,"km/h","","","",1,0
