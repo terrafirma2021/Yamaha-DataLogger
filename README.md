@@ -31,6 +31,7 @@ ESP32 s3 BLE Yamaha Datalogger
 - CPU Freq
 - Ram Free
 - Top Speed
+- MCU Uptime seconds (Wraps around after 65,536 18h.20m)
 
 #### Requirements:
 To build this project, you will need the following components:
