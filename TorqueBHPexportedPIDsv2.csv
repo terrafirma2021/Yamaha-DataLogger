@@ -1,0 +1,11 @@
+"Name", "ShortName", "ModeAndPID", "Equation", "Min Value", "Max Value", "Units", "Header", "startDiagnostic", "stopDiagnostic", "scale","minimumRefreshDelayMillis"
+"Coolant","Coolant","0x0105","(a)",0,255,"C","","","",1,0
+"Error Code Yamaha","Error","0x1001","(A)",0,255,"","","","",1,0
+"free ram","Ram Free","0x1004","a",0,320,"kb","","","",1,0
+"Gear Yamaha","Gear","0x01a4","a",0,6,"","","","",1,0
+"MCU Speed","MCU mhz","0x1003","A",0,250,"mhz","","","",1,0
+"MCU temp","MCU Temp","0x1002","A",0,100,"C","","","",1,0
+"MCU Uptime","MCU Time","0x1006","int16(a:b)",0,65000,"","","","",1,0
+"RPM Yamaha","RPM","0x010c","int16(a:b)",0,16000,"rpm","","","",1,0
+"Speed Yamaha","Speed","0x010d","A",0,250,"km/h","","","",1,0
+"Top Speed","Top Speed","0x1005","A",0,250,"","","","",1,0
