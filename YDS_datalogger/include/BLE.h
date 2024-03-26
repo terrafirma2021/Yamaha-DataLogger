@@ -9,6 +9,10 @@ bool Debug_RX = false;
 bool Debug_TX = false;
 bool Debug_PIDS = false;
 
+// Debug PIDS
+extern uint8_t RPMdbug;
+extern uint8_t coolantDbug;
+
 // forward declaration for CalculateGear_Flag;
 extern bool CalculateGear_Flag;
 
@@ -17,6 +21,9 @@ extern bool DisableBikeOff_Flag;
 
 // Function declaration for handling commands
 std::string handleCommand(const std::string &command);
+
+// Function declaration for BLEuart/Serial rx controls
+extern void incomingcontrols(std::string input);
 
 // ELM327 Service and Characteristic UUIDs
 const uint16_t ELM327_SERVICE_UUID = 0xFFF0;
@@ -229,92 +236,22 @@ public:
         }
     }
 
-    void UA_RX(uint8_t *data, size_t len)
+void UA_RX(uint8_t *data, size_t len)
+{
+    std::string input;
+
+    for (size_t i = 0; i < len; i++)
     {
-        // replace this lame String with proper std::string
-        std::string command;
-
-        for (size_t i = 0; i < len; i++)
+        if (data[i] != '\n')
         {
-            if (data[i] != '\n')
-            {
-                command += (char)data[i];
-                continue;
-            }
-
-            trimInPlace(command);
-            toUpperCaseInPlace(command);
-
-            // Process the command based on the received string
-            if (command == "DEBUG OFF" || command == "DEBUG 0")
-            {
-                Debug_RX = false;
-                Debug_TX = false;
-                Debug_PIDS = false;
-                Serial.println("Command Received: Debug Off");
-                msg("Command Received: Debug Off");
-            }
-            else if (command == "DEBUG RX")
-            {
-                Debug_RX = true;
-                Debug_TX = false;
-                Debug_PIDS = false;
-                Serial.println("Command Received: Debug RX Enabled");
-                msg("Command Received: Debug ELM RX Enabled");
-            }
-            else if (command == "DEBUG TX")
-            {
-                Debug_RX = false;
-                Debug_TX = true;
-                Debug_PIDS = false;
-                Serial.println("Command Received: Debug TX Enabled");
-                msg("Command Received: Debug TX Enabled");
-            }
-            else if (command == "DEBUG PID")
-            {
-                Debug_RX = false;
-                Debug_TX = false;
-                Debug_PIDS = true;
-                Serial.println("Command Received: Enabled PID Debug");
-                msg("Command Received: Enabled PID Debug");
-            }
-            else if (command == "RESET")
-            {
-                Serial.println("Command Received: Reset ESP");
-                msg("Command Received: Reset ESP");
-                ESP.restart();
-            }
-            else if (command == "GEAR LEARN")
-            {
-                CalculateGear_Flag = true;
-                Serial.println("Command Received: Starting Gear Learning");
-                Serial.println("Read the tutorial on how to use this feature");
-                msg("Command Received: Starting Gear Learning");
-            }
-            else if (command == "BIKE OFF")
-            {
-                DisableBikeOff_Flag = true;
-                Serial.println("Command Received: Disabled Bike timer");
-                msg("Command Received: Disabled Bike timer");
-            }
-            else if (command == "BIKE ON")
-            {
-                DisableBikeOff_Flag = false;
-                Serial.println("Command Received: Enabled Bike timer");
-                msg("Command Received: Enabled Bike timer");
-            }
-            else
-            {
-                Serial.print("No command found: ");
-                Serial.println(command.c_str());
-                msg("No command found: " + command);
-            }
-            // Clear the command string for the next command
-            command = "";
+            input += (char)data[i];
+            continue;
         }
-    }
-
-    // void ELM_RX(BLECharacteristic *characteristic)
+        incomingcontrols(input);
+    }    
+}
+    
+        // void ELM_RX(BLECharacteristic *characteristic)
     void ELM_RX(uint8_t *data, size_t len)
     {
         // Find the first non-whitespace character
