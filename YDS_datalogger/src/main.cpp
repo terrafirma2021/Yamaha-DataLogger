@@ -6,12 +6,14 @@
 #include "esp_timer.h"
 #include "nvs_flash.h"
 #include "nvs.h"
-#include <LCD.h>
+#include "LCD.h"
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <U8g2lib.h>
 #include <iostream>
 #include <string>
+#include "road.h"
+#include <Wire.h>
 
 // Define L9637D Pins
 #define YAM_TX 1
@@ -21,17 +23,24 @@
 // #define YAM_TX 12
 // #define YAM_RX 33
 
+// Define SDA and SCL pins
+#define MY_SCL_PIN 15
+#define MY_SDA_PIN 16
+
 // Debug Level
 extern bool Debug_RX;
 extern bool Debug_TX;
 extern bool Debug_PIDS;
 bool DisableBikeOff_Flag = false;
 
-//BLE Connected bool
+// Debug PIDS
+uint8_t RPMdbug = 50;
+uint8_t coolantDbug = 1;
+
+// BLE Connected bool
 extern bool clientConnected;
 
-
-//Watchdog timer Fix
+// Watchdog timer Fix
 bool isTempReady = false;
 
 // Time thresholds and timeouts
@@ -71,10 +80,11 @@ void setup();
 void loop();
 void YamahaInbound();
 void serialTerminal();
-void processSerialByte(byte incomingByte);
+void incomingcontrols(std::string input);
+void processYamahaRX(byte incomingByte);
 void handleIMMOSequence(byte incomingByte);
 void handleDiagStart(byte incomingByte);
-void HandleNormalOperation(byte incomingByte);
+void handleNormalOperation(byte incomingByte);
 void handleBikeOffCondition();
 void processECUData();
 void calculateRPM();
@@ -87,7 +97,7 @@ void nvs_myinit();
 void MCU_PIDS();
 void maximumSpeed();
 void sendUart(std::string msg);
-void DebugPIDS();
+void debugPIDS();
 
 // Calculate Gear Constants
 const uint16_t Gear_Vector_Size = 333; // 15*333 = 4995 ms (Gear detection time)
@@ -130,15 +140,16 @@ uint16_t NVS_stored_gear_buffer[MAX_STORED_GEARS];
 uint16_t NVS_index_current_gear = 0; // Variable to store the current gear ratio index from NVS
 
 // PIDS
-uint16_t RPM_PID;       // RPM * 50 = RAW
-uint8_t Speed_PID;      // RAW km/h
-uint8_t Coolant_PID;    // Temp = RAW
-uint8_t Error_PID;      // Error code
-uint8_t Gear_PID;       // RAW 00-05
-uint8_t Temp_PID;      // MCU Temp
-uint8_t CPU_PID;        // CPU Freq mhz
-uint8_t RAM_Free_PID;  // Free Ram
-uint8_t Max_Speed_PID;  // Max Speed Reached
+uint16_t RPM_PID;        // RPM * 50 = RAW
+uint8_t Speed_PID;       // RAW km/h
+uint8_t Coolant_PID;     // Temp = RAW
+uint8_t Error_PID;       // Error code
+uint8_t Gear_PID;        // RAW 00-05
+uint8_t Temp_PID;        // MCU Temp
+uint8_t CPU_PID;         // CPU Freq mhz
+uint8_t RAM_Free_PID;    // Free Ram
+uint8_t Max_Speed_PID;   // Max Speed Reached
+uint16_t MCU_Uptime_PID; // How long have we been alive
 
 // Setup
 void setup()
@@ -152,6 +163,7 @@ void setup()
     Serial.println("Free Heap: " + String(ESP.getFreeHeap()) + " bytes");
     Serial.println("Max Alloc Heap: " + String(ESP.getMaxAllocHeap()) + " bytes"); // Maximum allocatable block of memory
     nvs_myinit();
+    Wire.begin(MY_SDA_PIN, MY_SCL_PIN);
     u8g2.begin();
     MyCallbacks *myCallbacks = new MyCallbacks();
     bool success = Device::getInstance().start(myCallbacks);
@@ -167,7 +179,7 @@ void loop()
     YamahaInbound();
     displayData();
     serialTerminal();
-    DebugPIDS();
+    debugPIDS();
     MCU_PIDS();
 }
 
@@ -176,66 +188,118 @@ void YamahaInbound()
     if (Serial1.available())
     {
         byte incomingByte = Serial1.read();
-        processSerialByte(incomingByte);
+        processYamahaRX(incomingByte);
 
         // Update the timestamp of the last received byte
         lastByteTime = esp_timer_get_time();
     }
 }
 
-void serialTerminal() 
+void serialTerminal()
 {
     // Check if serial data is available
-    if (Serial.available()) 
+    if (Serial.available())
     {
-        String input = Serial.readStringUntil('\n');
-        input.toUpperCase();
+        std::string input;
+        char ch;
+        // Read each character until a newline is found
+        while (Serial.available() && (ch = Serial.read()) != '\n')
+        {
+            input += ch;
+        }
+        incomingcontrols(input);
+    }
+}
 
-        if (input.equals("DEBUG OFF") || input.equals("DEBUG 0")) 
-        {
-            (Serial.println("Command Received: Debug Off"));
-            Debug_RX = false;
-            Debug_TX = false;
-            Debug_PIDS = false;
-            DisableBikeOff_Flag = false;
-        } 
-        else if (input.equals("DEBUG RX")) 
-        {
-            (Serial.println("Command Received: Debug RX"));
-            Debug_RX = true;
-            Debug_TX = false;
-            Debug_PIDS = false;
-        } 
-        else if (input.equals("DEBUG TX")) 
-        {
-            (Serial.println("Command Received: Debug TX"));
-            Debug_RX = false;
-            Debug_TX = true;
-            Debug_PIDS = false;
-            
-        } 
-        else if (input.equals("DEBUG PIDS")) 
-        {
-            (Serial.println("Command Received: Debug PIDS"));
-            Debug_RX = false;
-            Debug_TX = false;
-            Debug_PIDS = true;
-        } 
-        else if (input.equals("BIKE ON")) 
-        {
-            (Serial.println("command Received: Bike timer disabled"));
-            DisableBikeOff_Flag = true;
-        }
-        else if (input.equals("RESET")) 
-        {
-            (Serial.println("command Received: Bye!"));
-            ESP.restart();
-        }
+void incomingcontrols(std::string input)
+{
+    Road::trimInPlace(input);
+    Road::toUpperCaseInPlace(input);
+    if (input == "DEBUG OFF" || input == "DEBUG 0")
+    {
+        Serial.println("Command Received: Debug Off");
+        Debug_RX = false;
+        Debug_TX = false;
+        Debug_PIDS = false;
+        DisableBikeOff_Flag = false;
+    }
+    else if (input == "DEBUG RX")
+    {
+        Serial.println("Command Received: Debug RX");
+        Debug_RX = true;
+        Debug_TX = false;
+        Debug_PIDS = false;
+        sendUart("Command Received: Debug RX");
+    }
+    else if (input == "DEBUG TX")
+    {
+        Serial.println("Command Received: Debug TX");
+        Debug_RX = false;
+        Debug_TX = true;
+        Debug_PIDS = false;
+        sendUart("Command Received: Debug TX");
+    }
+    else if (input == "DEBUG PIDS")
+    {
+        Serial.println("Command Received: Debug PIDS");
+        Debug_RX = false;
+        Debug_TX = false;
+        Debug_PIDS = true;
+        sendUart("Command Received: Debug PIDS");
+    }
+    else if (input == "BIKE ON")
+    {
+        Serial.println("Command Received: Bike timer disabled");
+        DisableBikeOff_Flag = false;
+        sendUart("Command Received: Bike timer disabled");
+    }
+    else if (input == "BIKE OFF")
+    {
+        DisableBikeOff_Flag = true;
+        Serial.println("Command Received: Disabled Bike timer");
+        sendUart("Command Received: Disabled Bike timer");
+    }
+    else if (input == "RESET")
+    {
+        Serial.println("Command Received: Bye!");
+        ESP.restart();
+    }
+    else if (input == "GEAR LEARN")
+    {
+        Serial.println("Command Received: Starting Gear Learning");
+        Serial.println("Read the tutorial on how to use this feature");
+        CalculateGear_Flag = true;
+        sendUart("Command Received: Starting Gear Learning");
+    }
+    else if (input.find("DEBUG RPM") == 0)
+    {
+        std::string valueStr = input.substr(9);
+        RPMdbug = std::stoi(valueStr);
+        Serial.print("Command Received: RPMdbug value adjusted to ");
+        Serial.println(RPMdbug);
+        std::string rpmString = std::to_string(RPMdbug);
+        sendUart("Command Received: RPMdbug value adjusted to ");
+        sendUart(rpmString);
+    }
+    else if (input.find("DEBUG TEMP") == 0)
+    {
+        std::string valueStr = input.substr(10);
+        coolantDbug = std::stoi(valueStr);
+        Serial.print("Command Received: coolantDbug value adjusted to ");
+        Serial.println(coolantDbug);
+        std::string tempString = std::to_string(coolantDbug);
+        sendUart("Command Received: coolantDbug value adjusted to ");
+        sendUart(tempString);
+    }
+    else
+    {
+        Serial.print("Command Not Known: ");
+        Serial.println(input.c_str()); // Convert std::string to c-string for Serial.print
     }
 }
 
 // Process each byte received from the serial port
-void processSerialByte(byte incomingByte)
+void processYamahaRX(byte incomingByte)
 {
     // First handle any ongoing IMMO sequence
     if (!isIMMOHandled)
@@ -250,7 +314,7 @@ void processSerialByte(byte incomingByte)
     // Proceed only if NormalOperation is flagged true
     if (NormalOperation)
     {
-        HandleNormalOperation(incomingByte);
+        handleNormalOperation(incomingByte);
     }
 }
 
@@ -322,7 +386,7 @@ void handleDiagStart(byte incomingByte)
     }
 }
 
-void HandleNormalOperation(byte incomingByte)
+void handleNormalOperation(byte incomingByte)
 {
     // Fill the buffer with incoming bytes
     ECU_Buffer[ECUBufferIndex++] = incomingByte;
@@ -408,13 +472,13 @@ void calculateRPM()
     uint16_t RPM = ECU_Buffer[0];
 
     // Adjust RPM using the multiplication factor
-    RPM *= 50; // Adjusted ECU multiplication factor
+    RPM = RPM * RPMdbug;
 
     // Assign the adjusted RPM directly to RPM_PID
     RPM_PID = RPM;
 
     // Assign the value to the calculateGear_RPM
-    gear_rpm = RPM;
+    gear_rpm = RPM_PID;
 
     // Set Flag to tell Calculate Gear function new byte has arrived
     gear_rpm_Flag = true;
@@ -466,21 +530,25 @@ void calculateCoolantTemp()
     uint8_t coolantTemp = ECU_Buffer[3];
 
     // Store the result in Coolant_PID
-    Coolant_PID = coolantTemp;
+    Coolant_PID = coolantTemp * coolantDbug;
 }
 
-void nvs_defaults(const char *mynamespace) {
+void nvs_defaults(const char *mynamespace)
+{
     nvs_handle my_handle;
     esp_err_t err;
 
     // Try to open the namespace in NVS_READWRITE mode.
     err = nvs_open(mynamespace, NVS_READWRITE, &my_handle);
-    if (err == ESP_ERR_NVS_NOT_FOUND) {
+    if (err == ESP_ERR_NVS_NOT_FOUND)
+    {
         // If the namespace was not found, it needs to be created.
         // Note: nvs_open does not explicitly create a namespace if it doesn't exist.
         // The namespace is created implicitly when a key-value pair is set.
         ESP_LOGI("NVS", "Namespace not found, creating it with default values.");
-    } else if (err != ESP_OK) {
+    }
+    else if (err != ESP_OK)
+    {
         ESP_LOGE("NVS", "Error (%s) opening NVS handle!", esp_err_to_name(err));
         return;
     }
@@ -489,19 +557,22 @@ void nvs_defaults(const char *mynamespace) {
 
     // Set default integer value
     err = nvs_set_i32(my_handle, "default_int", 123);
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         ESP_LOGE("NVS", "Failed to set default_int!");
     }
 
     // Set default string value
     err = nvs_set_str(my_handle, "default_str", "Hello NVS");
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         ESP_LOGE("NVS", "Failed to set default_str!");
     }
 
     // After setting your defaults, commit them to make sure they are saved.
     err = nvs_commit(my_handle);
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         ESP_LOGE("NVS", "Failed to commit defaults!");
     }
 
@@ -527,7 +598,8 @@ void nvs_myinit()
     nvs_handle_t nvs_handle;
     err = nvs_open(mynamespace, NVS_READONLY, &nvs_handle);
 
-    if (err == ESP_ERR_NVS_NOT_FOUND) {
+    if (err == ESP_ERR_NVS_NOT_FOUND)
+    {
         nvs_defaults(mynamespace);
     }
     else if (err != ESP_OK)
@@ -739,15 +811,16 @@ void maximumSpeed()
 void MCU_PIDS()
 {
     static unsigned long previousTime = 0;
-    const long MCUTimer = 1000; // 1 Milisecond to cure Watchdog timer bug (Could be set to less frequent updates if needed)
+    const long MCUTimer = 1000;
     float temperature;
     unsigned long currentTime = esp_timer_get_time();
-    
+
     // Check if it's time to update all PID values
-    if (currentTime - previousTime >= MCUTimer) {
+    if (currentTime - previousTime >= MCUTimer)
+    {
         previousTime = currentTime;
-        
-        temperature = temperatureRead();       
+        MCU_Uptime_PID = (esp_timer_get_time() / 1000000) % 65535; // Ensure wraparound to avoid buffer overflow
+        temperature = temperatureRead();
         Temp_PID = temperature;
         CPU_PID = ESP.getCpuFreqMHz();
         RAM_Free_PID = ESP.getFreeHeap() / 1024;
@@ -755,14 +828,13 @@ void MCU_PIDS()
 }
 
 void sendUart(std::string msg)
-    {
-        Device::getInstance().sendUART(msg);
-    }
-
-
-void DebugPIDS()
 {
-        if (Debug_PIDS)
+    Device::getInstance().sendUART(msg);
+}
+
+void debugPIDS()
+{
+    if (Debug_PIDS)
     {
         Serial.print("RPM: ");
         Serial.println(RPM_PID);
@@ -782,5 +854,7 @@ void DebugPIDS()
         Serial.println(RAM_Free_PID);
         Serial.print("Max Speed: ");
         Serial.println(Max_Speed_PID);
+        Serial.print("MCU Uptime Mins:");
+        Serial.println(MCU_Uptime_PID);
     }
 }
