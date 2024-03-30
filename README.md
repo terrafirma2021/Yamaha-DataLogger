@@ -17,7 +17,7 @@ ESP32 s3 BLE Yamaha Datalogger
 
 
 #### Added OLED Support:
-0.96" I2C
+- 0.96" I2C
 
 
 
