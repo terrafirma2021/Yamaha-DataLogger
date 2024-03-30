@@ -14,6 +14,7 @@ ESP32 s3 BLE Yamaha Datalogger
 - Wokwi PCB Design
 - My custom PCB build
 - L9637d pinout
+- Realdash XML (Plug and play)
 
 
 #### Added OLED Support:
