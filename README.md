@@ -15,6 +15,7 @@ ESP32 s3 BLE Yamaha Datalogger
 - My custom PCB build
 - L9637d pinout
 - Realdash XML (Plug and play)
+- racechrono.rcz file
 
 
 #### Added OLED Support:
