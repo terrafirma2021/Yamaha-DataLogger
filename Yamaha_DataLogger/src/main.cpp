@@ -689,7 +689,6 @@ void updateGearPID()
 void maximumSpeed() {
     static byte topSpeed = 10; // Static variable initialization
     if (Speed_PID > topSpeed) {
-        Serial.print("Speed_PID > topSpeed");
         topSpeed = Speed_PID; // Update if the current Speed_PID is greater
         Max_Speed_PID = topSpeed;
     }
