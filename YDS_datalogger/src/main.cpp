@@ -531,6 +531,7 @@ void calculateCoolantTemp()
 
     // Store the result in Coolant_PID
     Coolant_PID = coolantTemp * coolantDbug;
+    //Coolant_PID = coolantTemp - 30; // Actual Value... Remove Dbug
 }
 
 void nvs_defaults(const char *mynamespace)
