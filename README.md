@@ -16,6 +16,7 @@ ESP32 s3 BLE Yamaha Datalogger
 - L9637d pinout
 - Realdash XML (Plug and play)
 - racechrono.rcz file
+- 3d Printed Case STL + Photos
 
 
 #### Added OLED Support:
@@ -44,6 +45,7 @@ To build this project, you will need the following components:
 #### Additional Information:
 - It's possible to pozi-tap the loom for other sensor data not sent via the k-line.
 - Wokwi circuit design: https://wokwi.com/projects/391712730296045569
+- Thingverse link here: https://www.thingiverse.com/thing:6560376
 
 #### Big thanks to:
 - [TriB](https://github.com/HerrRiebmann) For the L9637D's and LOTS of wise advice from an ECU VET :) 
