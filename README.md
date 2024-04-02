@@ -54,5 +54,5 @@ To build this project, you will need the following components:
 - [RealDash](https://realdash.net/index.php)
 - [Race Chrono](https://racechrono.com)
 
-
+![Screenshot](https://github.com/terrafirma2021/Yamaha-DataLogger/blob/main/3d%20printed%20case/20240402_010515.jpg)
 ![Screenshot](https://github.com/terrafirma2021/Yamaha-DataLogger/blob/main/Newpids_n.jpg)
