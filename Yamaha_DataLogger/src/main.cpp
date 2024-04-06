@@ -16,12 +16,12 @@
 #include <numeric>
 
 // Define L9637D Pins
-// #define YAM_TX 1
-// #define YAM_RX 38
+ #define YAM_TX 1
+ #define YAM_RX 38
 
 // Debug Test Pins for L9637D
-#define YAM_TX 12
-#define YAM_RX 33
+///#define YAM_TX 12
+//#define YAM_RX 33
 
 // Define SDA and SCL pins
 #define MY_SCL_PIN 15
@@ -40,8 +40,6 @@ extern bool clientConnected;
 bool isTempReady = false;
 
 // Time thresholds and timeouts
-const unsigned long FRAME_END_THRESHOLD_TIMER = 3000;   // 5 milliseconds in microseconds
-const unsigned long DIAG_START_TIMEOUT_TIMER = 2000000; // 2 seconds in microseconds
 const unsigned long BIKE_OFF_TIMEOUT_TIMER = 5000000;   // 5 seconds in microseconds
 
 // Magic numbers
@@ -58,9 +56,10 @@ byte ECU_Buffer[ECU_BUFFER_SIZE];
 // Immo discarded bytes
 static int discardedBytesCount = 0;
 
-using byte = unsigned char;
-using ECU_BufferDataType = byte;
-using t_buffer = std::vector<ECU_BufferDataType>;
+// using byte = unsigned char;
+// using t_buffer_item = byte;
+using t_buffer_item = uint8_t;
+using t_buffer = std::vector<t_buffer_item>;
 
 // Buffer indices and time variables
 byte VehicleSpeedRawBufferIndex = 0;
@@ -80,7 +79,7 @@ void setup();
 void loop();
 void serialRX();
 void YamahaRX();
-void processIMMOSequence(t_buffer &buffer, ECU_BufferDataType receivedByte);
+void processIMMOSequence(t_buffer &buffer, t_buffer_item receivedByte);
 void alignedFrame(const t_buffer &buffer);
 void handleDiagData(const t_buffer &buffer);
 void handleNormalData(const t_buffer &buffer);
@@ -88,10 +87,10 @@ void sendResponse(const std::string &message);
 void serialRX();
 void receiveResponse(std::string);
 void handleBikeOffCondition();
-void calculateRPM(ECU_BufferDataType rpmByte);
-void calculateVehicleSpeed(ECU_BufferDataType speedByte);
-void extractErrorCode(ECU_BufferDataType Error);
-void calculateCoolantTemp(ECU_BufferDataType Temp);
+void calculateRPM(t_buffer_item rpmByte);
+void calculateVehicleSpeed(t_buffer_item speedByte);
+void extractErrorCode(t_buffer_item Error);
+void calculateCoolantTemp(t_buffer_item Temp);
 void nvs_defaults(const char *Namespace);
 void nvs_myinit();
 void CalculateGear(uint16_t currentSpeed, uint16_t currentRPM);
@@ -205,7 +204,11 @@ void YamahaRX()
     // Update the timestamp of the last received byte
     lastByteTime = esp_timer_get_time();
 
-    ECU_BufferDataType receivedByte = Serial1.read();
+    t_buffer_item receivedByte = Serial1.read();
+
+    // Print everything
+    Serial.println(receivedByte, HEX); // Print in hexadecimal format
+
 
     // Check and handle the first byte of the IMMO sequence immediately
     if (!is3E && receivedByte == 0x3E)
@@ -221,6 +224,7 @@ void YamahaRX()
         // Continue handling the IMMO sequence
         processIMMOSequence(buffer, receivedByte);
     }
+
     else if (isIMMOHandled)
     {
         // Ensure buffer does not exceed 5 bytes
@@ -238,7 +242,7 @@ void YamahaRX()
 
             if (!allZero)
             {
-                ECU_BufferDataType sum = std::accumulate(buffer.begin(), buffer.end() - 1, 0);
+                t_buffer_item sum = std::accumulate(buffer.begin(), buffer.end() - 1, 0);
                 if (sum == buffer.back())
                 {
                     alignedFrame(buffer);
@@ -249,20 +253,23 @@ void YamahaRX()
     }
 }
 
-void processIMMOSequence(t_buffer &buffer, ECU_BufferDataType receivedByte)
+
+
+void processIMMOSequence(t_buffer &buffer, t_buffer_item receivedByte)
 {
+    // Push the received byte into the buffer
     buffer.push_back(receivedByte);
 
     if (buffer.size() == 61)
     {
-
+        
         if (buffer.back() == 0xCD)
         {
             diagMenu = true; // Diag menu init
             buffer.clear();
             sendResponse("Diag start initiated.");
         }
-        else if (buffer.back() == 0x01)
+        else
         {
             buffer.clear();
         }
@@ -271,6 +278,10 @@ void processIMMOSequence(t_buffer &buffer, ECU_BufferDataType receivedByte)
         sendResponse("Normal start initiated.");
     }
 }
+
+
+
+
 
 void alignedFrame(const t_buffer &buffer)
 {
@@ -445,7 +456,7 @@ void handleBikeOffCondition()
 }
 
 
-void calculateRPM(ECU_BufferDataType rpmByte)
+void calculateRPM(t_buffer_item rpmByte)
 {
 
     uint16_t RPM = rpmByte; // Directly use rpmByte
@@ -458,7 +469,7 @@ void calculateRPM(ECU_BufferDataType rpmByte)
     gear_rpm_Flag = true;
 }
 
-void calculateVehicleSpeed(ECU_BufferDataType speedByte)
+void calculateVehicleSpeed(t_buffer_item speedByte)
 {
 
     if (VehicleSpeedRawBufferIndex < VEHICLE_SPEED_RAW_BUFFER_SIZE)
@@ -488,12 +499,12 @@ void calculateVehicleSpeed(ECU_BufferDataType speedByte)
     }
 }
 
-void extractErrorCode(ECU_BufferDataType Error)
+void extractErrorCode(t_buffer_item Error)
 {
     Error_PID = Error;
 }
 
-void calculateCoolantTemp(ECU_BufferDataType Temp)
+void calculateCoolantTemp(t_buffer_item Temp)
 {
     Coolant_PID = Temp - 30;
 }
