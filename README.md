@@ -7,6 +7,14 @@ ESP32 s3 BLE Yamaha Datalogger
 - Now displays PIDS via OLED screen. 
 - Now handles automatic gear ratio tuning via BLE Serial "gear learn", (using gipro gear indicators learn function approach).
 
+#### updates:
+- Migrated NVS to spiffs
+- gear ratios persist on cold boot / auto load on startup
+- added simple temrinal menu via serial/ble
+- All serial/ble serial commands are simultaneously mirrored.
+- General tidy up
+
+
 
 #### Added Files:
 - Added Ecu Emulator for testing
