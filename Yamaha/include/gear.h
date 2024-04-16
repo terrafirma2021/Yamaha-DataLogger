@@ -203,7 +203,7 @@ void gearLookup() {
   }
 
   // Check for division by zero before calculating realRatio
-  if (gear_speed == 0 || gear_rpm == 0) { // To avoid division by zero
+  if (gear_speed < 7 || gear_rpm == 0) { // Less than 7 km/h assume Neutral
     Gear_PID = 0; // Set Gear_PID to 0 if there's no valid input
     return;
   }
