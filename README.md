@@ -63,4 +63,4 @@ To build this project, you will need the following components:
 - [Race Chrono](https://racechrono.com)
 
 ![Screenshot](https://github.com/terrafirma2021/Yamaha-DataLogger/blob/main/3d%20printed%20case/20240402_010515.jpg)
-![Screenshot](https://github.com/terrafirma2021/Yamaha-DataLogger/blob/main/Newpids_n.jpg)
+![Screenshot](https://raw.githubusercontent.com/terrafirma2021/Yamaha-DataLogger/main/Screenshot_20240416_134657_Torque.webp)
