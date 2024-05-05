@@ -458,6 +458,10 @@ void handleBikeOffCondition()
     ECUBufferIndex = 0;
     lastByteTime = 0;
     Gear_PID = 0;
+    Coolant_PID = 0;
+    RPM_PID = 0;
+    Speed_PID = 0;
+    Error_PID = 0;
     // Reset Gear
     ratioArray.clear();
     sendResponse("\nBike Off Detected");
