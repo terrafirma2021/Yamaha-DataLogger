@@ -13,6 +13,7 @@ ESP32 s3 BLE Yamaha Datalogger
 - added simple temrinal menu via serial/ble
 - All serial/ble serial commands are simultaneously mirrored.
 - General tidy up
+- Migrated send/response commands
 
 
 
@@ -49,6 +50,7 @@ To build this project, you will need the following components:
 - L9637D
 - <strike>510 pull-up resistor</strike> Not needed for RX
 - Level conversion components
+- Due to ESP32 startup time, an external power supply switch will be required to enable esp32 to start before the ecu! This saves re-writing the codebase.
 
 #### Additional Information:
 - It's possible to pozi-tap the loom for other sensor data not sent via the k-line.
