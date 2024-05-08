@@ -26,7 +26,7 @@ ESP32 s3 BLE Yamaha Datalogger
 - Realdash XML (Plug and play)
 - racechrono.rcz file
 - 3d Printed Case STL + Photos
-- 3D printed case with switch mount:
+- 3D printed case with switch mount (switch can be found below):
 - https://www.amazon.co.uk/dp/B01N367QLZ
 
 
