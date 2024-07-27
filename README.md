@@ -5,7 +5,7 @@ ESP32 s3 BLE Yamaha Datalogger
 - The Yamaha DataLogger is an ESP32-S3 based device designed to convert k-line data into Canbus ODB2 standard, using ELM327 emulation. 
  Enabling compatibility with apps like RaceChrono, Realdash, and Torque. 
 - Now displays PIDS via OLED screen. 
-- Now handles automatic gear ratio tuning via BLE Serial "Gears", (using gipro gear indicators learn function approach).
+- Now handles automatic gear ratio tuning via BLE Serial "Gears", (using gipro gear indicators learn function approach). Place bike on centre stand and cycle though the gears 
 
 #### updates:
 - Migrated NVS to spiffs
